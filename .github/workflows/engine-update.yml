@@ -1,0 +1,109 @@
+name: Auto-update YouTube engine
+
+# Every 6 hours: if the NewPipe team released a fix (a new NewPipeExtractor release, or the
+# version pinned by the official NewPipe app), build a new engine and publish it. Installed
+# phones download it silently — nobody has to do anything.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lucbao-publish
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pick the newest extractor fix
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(tr -d '[:space:]' < engine/extractor.version)"
+          touch engine/skip.txt
+          tag="$(gh api repos/TeamNewPipe/NewPipeExtractor/releases/latest --jq .tag_name || true)"
+          pin="$(curl -fsSL https://raw.githubusercontent.com/TeamNewPipe/NewPipe/master/gradle/libs.versions.toml \
+                 | sed -n 's/^teamnewpipe-newpipe-extractor *= *"\([^"]*\)".*/\1/p' | head -n1 || true)"
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/TeamNewPipe/NewPipeExtractor.git "$RUNNER_TEMP/ext"
+          ts() { git -C "$RUNNER_TEMP/ext" log -1 --format=%ct "$1" 2>/dev/null || echo 0; }
+          best="$current"; best_ts="$(ts "$current")"
+          for cand in "$tag" "$pin"; do
+            [ -z "$cand" ] && continue
+            fails="$(grep -cxF "$cand" engine/skip.txt || true)"
+            if [ "${fails:-0}" -ge 3 ]; then echo "skip $cand (failed 3 times)"; continue; fi
+            t="$(ts "$cand")"
+            if [ "$t" -gt "$best_ts" ]; then best="$cand"; best_ts="$t"; fi
+          done
+          echo "current=$current candidate=$best"
+          if [ "$best" != "$current" ]; then
+            echo "$best" > engine/extractor.version
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "candidate=$best" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        if: steps.pick.outputs.changed == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.pick.outputs.changed == 'true'
+
+      - name: Build and publish the new engine
+        id: build
+        if: steps.pick.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: bash ci/build-and-publish.sh engine
+
+      - name: Record the new version
+        if: steps.pick.outputs.changed == 'true' && steps.build.outcome == 'success'
+        run: |
+          git config user.name "lucbao-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine/extractor.version
+          git commit -m "engine: NewPipeExtractor ${{ steps.pick.outputs.candidate }}"
+          git push
+
+      - name: Remember a failed attempt (a version is skipped after 3 failures)
+        if: failure() && steps.pick.outputs.changed == 'true'
+        run: |
+          git checkout -- engine/extractor.version
+          echo "${{ steps.pick.outputs.candidate }}" >> engine/skip.txt
+          git config user.name "lucbao-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine/skip.txt
+          git commit -m "engine: skip ${{ steps.pick.outputs.candidate }} (build failed)"
+          git push
+
+      - name: Keep the schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GitHub pauses schedules after 60 days without activity; prevent that.
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/engine-update.yml/enable" || true
+          git pull --quiet --ff-only || true
+          last="$(git log -1 --format=%ct)"; now="$(date +%s)"
+          if [ $(( now - last )) -gt $(( 40 * 24 * 3600 )) ]; then
+            git config user.name "lucbao-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive"
+            git push
+          fi
