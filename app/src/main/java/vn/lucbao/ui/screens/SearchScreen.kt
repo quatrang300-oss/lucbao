@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,7 +54,6 @@ import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.LoadingBox
 import vn.lucbao.ui.components.VideoRow
 import vn.lucbao.ui.theme.Luc
-import vn.lucbao.ui.theme.Roboto
 import vn.lucbao.ui.theme.LucIcons
 
 @Composable
@@ -108,13 +109,16 @@ fun SearchScreen(vm: AppViewModel, focusSignal: Int, onPlay: (Video) -> Unit, on
                 ) {
                     Box(Modifier.weight(1f)) {
                         if (query.isEmpty()) {
-                            Text("Tìm hoặc dán link YouTube…", color = c.muted, fontSize = 14.sp)
+                            Text(
+                                "Tìm kiếm hoặc dán link youtube", color = c.muted, fontSize = 14.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
                         }
                         BasicTextField(
                             value = query,
                             onValueChange = vm::onQueryChange,
                             singleLine = true,
-                            textStyle = TextStyle(color = c.text, fontSize = 14.sp, fontFamily = Roboto),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = c.text, fontSize = 14.sp),
                             cursorBrush = SolidColor(c.primary),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { go(query) }),

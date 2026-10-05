@@ -14,7 +14,8 @@
 - **Theo dõi kênh không cần tài khoản**: video mới của các kênh đang theo dõi luôn hiện đầu tiên ở Trang chủ (mục *Dành cho bạn* và *Đang theo dõi*). Danh sách chỉ lưu trên máy.
 - **Khoá màn hình cho trẻ em**: chặn mọi thao tác trên trình phát; nhấn giữ biểu tượng ổ khoá 1,5 giây để mở.
 - Khi xem toàn màn hình: nút **Nhiều video hơn** mở danh sách video khác ở 1/3 bên phải, video vẫn phát ở 2/3 bên trái.
-- Dùng phông Roboto đi kèm app để chữ tiếng Việt hiển thị đúng trên mọi máy; riêng chữ "Lục Bảo" được vẽ thành hình.
+- **Tải về máy**: tải video với độ phân giải tuỳ chọn (MP4 tới 1080p, WebM cho 1440p/4K) hoặc chỉ tải nhạc (M4A). Tệp lưu ở Movies/LucBao và Music/LucBao, xem lại trong Thư viện › Đã tải.
+- **Chọn phông chữ** trong Cài đặt: Roboto, phông của máy, Be Vietnam Pro hoặc Noto Sans. Riêng chữ "Lục Bảo" được vẽ thành hình nên luôn hiển thị đúng.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
 ## Tự cập nhật hoạt động thế nào
@@ -64,4 +65,4 @@ Cấu hình: AGP 8.11, Kotlin 2.2, Jetpack Compose, Media3 1.7, compileSdk 36, m
 - Lục Bảo lấy video trực tiếp từ YouTube mà không qua trình phát chính thức, nên **vi phạm điều khoản của YouTube**. Ứng dụng chỉ dành cho dùng riêng và chia sẻ cho người quen, **không được đưa lên CH Play**.
 - Video giới hạn độ tuổi (cần đăng nhập) chưa xem được.
 - Lục Bảo không thuộc YouTube hay Google.
-- Mã nguồn theo giấy phép **GPLv3** (giống NewPipeExtractor, xem `LICENSE`). Phông chữ Roboto và Playfair Display (chỉ dùng để vẽ chữ "Lục Bảo") dùng giấy phép SIL OFL (xem `docs/licenses`).
+- Mã nguồn theo giấy phép **GPLv3** (giống NewPipeExtractor, xem `LICENSE`). Phông chữ Roboto, Be Vietnam Pro, Noto Sans và Playfair Display (chỉ dùng để vẽ chữ "Lục Bảo") dùng giấy phép SIL OFL (xem `docs/licenses`).

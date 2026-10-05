@@ -87,6 +87,7 @@ import vn.lucbao.player.Quality
 import vn.lucbao.player.QualityChoice
 import vn.lucbao.ui.components.Avatar
 import vn.lucbao.ui.components.ChannelSheet
+import vn.lucbao.ui.components.DownloadSheet
 import vn.lucbao.ui.components.FollowButton
 import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.PillButton
@@ -554,6 +555,7 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
     val settings by Prefs.state.collectAsStateWithLifecycle()
     var expanded by remember(v.url) { mutableStateOf(false) }
     var channelSheet by remember { mutableStateOf(false) }
+    var downloadSheet by remember { mutableStateOf(false) }
     val channelUrl = d?.channelUrl ?: v.channelUrl
 
     LazyColumn(Modifier.fillMaxSize()) {
@@ -635,6 +637,9 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
                 if (ui.choices.isNotEmpty()) {
                     ActionChip(LucIcons.Tune, ui.quality?.label ?: "Chất lượng", false, onQuality)
                 }
+                if (d != null && !d.live) {
+                    ActionChip(LucIcons.Download, "Tải về", false) { downloadSheet = true }
+                }
                 ActionChip(LucIcons.Share, "Chia sẻ", false) {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(Intent.EXTRA_TEXT, v.url)
@@ -655,6 +660,10 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
             VideoRow(r, onClick = { onPlay(r) })
         }
         item(key = "pad") { Spacer(Modifier.height(24.dp)) }
+    }
+
+    if (downloadSheet && d != null) {
+        DownloadSheet(d, onDismiss = { downloadSheet = false })
     }
 
     if (channelSheet && channelUrl != null) {

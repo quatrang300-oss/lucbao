@@ -294,7 +294,7 @@ private fun Root(vm: AppViewModel, actions: ScreenActions) {
         2 -> false
         else -> isSystemInDarkTheme()
     }
-    LucTheme(dark) {
+    LucTheme(dark, settings.font) {
         val view = LocalView.current
         SideEffect {
             val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect

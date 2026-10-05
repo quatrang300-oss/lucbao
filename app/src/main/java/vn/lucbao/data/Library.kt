@@ -24,6 +24,22 @@ data class Channel(
     val addedAt: Long,
 )
 
+/** A finished download saved in Movies/LucBao or Music/LucBao. */
+data class DownloadEntry(
+    val title: String,
+    val thumbnail: String?,
+    /** content:// Uri used to open / delete the file */
+    val uri: String,
+    /** file path on Android 8–9, else null */
+    val path: String?,
+    val mime: String,
+    /** e.g. "1080p · MP4" */
+    val label: String,
+    val bytes: Long,
+    val sourceUrl: String,
+    val at: Long,
+)
+
 data class FavoriteEntry(
     val video: Video,
     val addedAt: Long,
@@ -44,6 +60,9 @@ object Library {
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
 
+    private val _downloads = MutableStateFlow<List<DownloadEntry>>(emptyList())
+    val downloads: StateFlow<List<DownloadEntry>> = _downloads.asStateFlow()
+
     fun init(context: Context) {
         file = File(context.filesDir, "library.json")
         runCatching {
@@ -54,6 +73,19 @@ object Library {
                 }
                 _favorites.value = root.optJSONArray("favorites").toList { o ->
                     FavoriteEntry(o.getJSONObject("v").toVideo(), o.optLong("t"))
+                }
+                _downloads.value = root.optJSONArray("downloads").toList { o ->
+                    DownloadEntry(
+                        title = o.optString("title"),
+                        thumbnail = o.optString("thumb").ifEmpty { null },
+                        uri = o.getString("uri"),
+                        path = o.optString("path").ifEmpty { null },
+                        mime = o.optString("mime"),
+                        label = o.optString("label"),
+                        bytes = o.optLong("bytes"),
+                        sourceUrl = o.optString("src"),
+                        at = o.optLong("t"),
+                    )
                 }
                 _channels.value = root.optJSONArray("channels").toList { o ->
                     Channel(
@@ -135,8 +167,21 @@ object Library {
         save()
     }
 
+    @Synchronized
+    fun addDownload(entry: DownloadEntry) {
+        _downloads.value = listOf(entry) + _downloads.value.filterNot { it.uri == entry.uri }
+        save()
+    }
+
+    @Synchronized
+    fun removeDownload(entry: DownloadEntry) {
+        _downloads.value = _downloads.value.filterNot { it.uri == entry.uri }
+        save()
+    }
+
     private fun save() {
         val h = _history.value
+        val dl = _downloads.value
         val f = _favorites.value
         val ch = _channels.value
         io.execute {
@@ -150,6 +195,16 @@ object Library {
                 })
                 root.put("favorites", JSONArray().apply {
                     f.forEach { put(JSONObject().put("v", it.video.toJson()).put("t", it.addedAt)) }
+                })
+                root.put("downloads", JSONArray().apply {
+                    dl.forEach {
+                        put(
+                            JSONObject().put("title", it.title).put("thumb", it.thumbnail ?: "")
+                                .put("uri", it.uri).put("path", it.path ?: "").put("mime", it.mime)
+                                .put("label", it.label).put("bytes", it.bytes).put("src", it.sourceUrl)
+                                .put("t", it.at)
+                        )
+                    }
                 })
                 root.put("channels", JSONArray().apply {
                     ch.forEach {

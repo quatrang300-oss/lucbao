@@ -17,6 +17,8 @@ data class Settings(
     val autoPip: Boolean = true,
     val autoplayNext: Boolean = true,
     val onboarded: Boolean = false,
+    /** 0 = Roboto (bundled), 1 = phone's system font, 2 = Be Vietnam Pro, 3 = Noto Sans */
+    val font: Int = 0,
 )
 
 object Prefs {
@@ -35,6 +37,7 @@ object Prefs {
             autoPip = sp.getBoolean("autoPip", true),
             autoplayNext = sp.getBoolean("autoplayNext", true),
             onboarded = sp.getBoolean("onboarded", false),
+            font = sp.getInt("font", 0),
         )
     }
 
@@ -49,6 +52,7 @@ object Prefs {
             .putBoolean("autoPip", s.autoPip)
             .putBoolean("autoplayNext", s.autoplayNext)
             .putBoolean("onboarded", s.onboarded)
+            .putInt("font", s.font)
             .apply()
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -120,7 +121,10 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
                 ) {
                     Icon(LucIcons.Search, null, tint = c.muted, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(9.dp))
-                    Text("Tìm video, bài hát, hoặc dán link YouTube…", color = c.muted, fontSize = 13.sp)
+                    Text(
+                        "Tìm kiếm hoặc dán link youtube", color = c.muted, fontSize = 13.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
             item(key = "chips") {

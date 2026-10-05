@@ -52,7 +52,9 @@ import vn.lucbao.engine.EngineManager
 import vn.lucbao.player.Quality
 import vn.lucbao.ui.components.LucChip
 import vn.lucbao.ui.components.PillButton
+import vn.lucbao.ui.theme.FontChoices
 import vn.lucbao.ui.theme.Luc
+import vn.lucbao.ui.theme.fontFamilyFor
 import vn.lucbao.ui.theme.LucIcons
 import vn.lucbao.update.Updater
 import java.text.SimpleDateFormat
@@ -127,6 +129,33 @@ fun SettingsScreen() {
                     LucChip(label, s.theme == v, onClick = { Prefs.update { it.copy(theme = v) } })
                 }
             }
+        }
+
+        Card("Phông chữ") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                FontChoices.forEachIndexed { i, (label, family) ->
+                    val on = s.font == i
+                    Text(
+                        label,
+                        fontFamily = family,
+                        fontSize = 13.5.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (on) c.onPrimary else c.text,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (on) c.primary else c.card)
+                            .border(1.dp, if (on) androidx.compose.ui.graphics.Color.Transparent else c.line, RoundedCornerShape(50))
+                            .clickable { Prefs.update { it.copy(font = i) } }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+            Text(
+                "Xem thử: Ổn định – Đặc biệt – Lưỡng lự – Nghiêng ngả – Ễnh ương",
+                fontFamily = fontFamilyFor(s.font), color = c.text, fontSize = 14.sp,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+            Body("Nếu chữ có dấu bị lỗi trên máy bạn, hãy thử phông khác. Ổn nhất thường là \"Phông của máy\" hoặc \"Be Vietnam Pro\".")
         }
 
         Card("Chất lượng mặc định") {

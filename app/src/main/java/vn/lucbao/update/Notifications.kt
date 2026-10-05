@@ -26,6 +26,15 @@ object Notifications {
                 description = "Thông báo khi Lục Bảo có bản mới"
             }
         )
+        createDownloadChannel(nm)
+    }
+
+    fun createDownloadChannel(nm: NotificationManager) {
+        nm.createNotificationChannel(
+            NotificationChannel("downloads", "Tải về", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Tiến độ tải video và nhạc"
+            }
+        )
     }
 
     fun showUpdateReady(context: Context, confirm: Intent) {

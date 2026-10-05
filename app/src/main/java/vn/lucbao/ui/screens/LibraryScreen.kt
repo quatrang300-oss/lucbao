@@ -39,6 +39,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.lucbao.data.Channel
+import vn.lucbao.data.DownloadEntry
+import vn.lucbao.download.DownloadWorker
+import vn.lucbao.download.MediaSaver
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import vn.lucbao.ui.components.IconTap
+import vn.lucbao.ui.components.Thumb
+import vn.lucbao.ui.components.sizeText
 import vn.lucbao.data.Format
 import vn.lucbao.data.HistoryEntry
 import vn.lucbao.data.Library
@@ -47,13 +59,13 @@ import vn.lucbao.ui.components.Avatar
 import vn.lucbao.ui.components.ChannelSheet
 import vn.lucbao.ui.components.EmptyState
 import vn.lucbao.ui.components.FollowButton
-import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.VideoCard
 import vn.lucbao.ui.components.VideoRow
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
 import java.util.Calendar
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(onPlay: (Video) -> Unit) {
     val c = Luc.colors
@@ -61,6 +73,12 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
     val favorites by Library.favorites.collectAsStateWithLifecycle()
     val channels by Library.channels.collectAsStateWithLifecycle()
     var openChannel by remember { mutableStateOf<Channel?>(null) }
+    val downloads by Library.downloads.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val work by remember { WorkManager.getInstance(context).getWorkInfosByTagFlow(DownloadWorker.TAG) }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val active = work.filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+    var deleting by remember { mutableStateOf<DownloadEntry?>(null) }
     var tab by rememberSaveable { mutableStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -98,7 +116,7 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                     .background(c.surface2)
                     .padding(4.dp)
             ) {
-                listOf(LucIcons.History to "Lịch sử", LucIcons.Heart to "Yêu thích", LucIcons.PersonAdd to "Kênh").forEachIndexed { i, (icon, label) ->
+                listOf(LucIcons.History to "Lịch sử", LucIcons.Heart to "Yêu thích", LucIcons.PersonAdd to "Kênh", LucIcons.Download to "Đã tải").forEachIndexed { i, (icon, label) ->
                     val on = tab == i
                     Row(
                         Modifier
@@ -113,7 +131,7 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                         Icon(icon, null, tint = if (on) c.primary else c.muted, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            label, fontSize = 13.sp, color = if (on) c.text else c.muted,
+                            label, fontSize = 12.sp, maxLines = 1, color = if (on) c.text else c.muted,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
@@ -130,6 +148,9 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 if (tab == 0) {
                     Stat(history.size.toString(), "video đã xem", Modifier.weight(1f))
                     Stat(Format.hours(weekMs), "xem tuần này", Modifier.weight(1f))
+                } else if (tab == 3) {
+                    Stat(downloads.size.toString(), "tệp đã tải", Modifier.weight(1f))
+                    Stat(sizeText(downloads.sumOf { it.bytes }).removePrefix("~").ifEmpty { "0 MB" }, "dung lượng", Modifier.weight(1f))
                 } else if (tab == 2) {
                     Stat(channels.size.toString(), "kênh đang theo dõi", Modifier.weight(1f))
                     Stat("Riêng tư", "không cần tài khoản", Modifier.weight(1f))
@@ -162,6 +183,67 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 }
             }
             if (history.isNotEmpty()) item(key = "tipH") { Tip("Nhấn giữ một video để xoá khỏi lịch sử.") }
+        } else if (tab == 3) {
+            itemsIndexed(active, key = { _, w -> "w-${w.id}" }) { _, w ->
+                val title = w.progress.getString(DownloadWorker.KEY_TITLE)
+                    ?: w.tags.firstOrNull { it.startsWith("t:") }?.removePrefix("t:") ?: "Video"
+                val p = w.progress.getFloat(DownloadWorker.KEY_PROGRESS, 0f)
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            title, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            if (w.state == WorkInfo.State.ENQUEUED) "Đang chờ" else "${(p * 100).toInt()}%",
+                            color = c.muted, fontSize = 11.sp
+                        )
+                        IconTap(LucIcons.Close, "Huỷ", size = 18, tint = c.muted) {
+                            WorkManager.getInstance(context).cancelWorkById(w.id)
+                        }
+                    }
+                    LinearProgressIndicator(
+                        progress = { p },
+                        color = c.primary,
+                        trackColor = c.surface2,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    )
+                }
+            }
+            if (downloads.isEmpty() && active.isEmpty()) {
+                item(key = "emptyD") {
+                    EmptyState(
+                        "Chưa tải video nào",
+                        "Khi xem video, bấm “Tải về” để lưu video hoặc nhạc vào máy, xem không cần mạng."
+                    )
+                }
+            }
+            itemsIndexed(downloads, key = { i, d -> "d-$i-${d.uri}" }) { _, d ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = { openDownload(context, d) },
+                            onLongClick = { deleting = d }
+                        )
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Thumb(d.thumbnail, Modifier.width(120.dp), corner = 10.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            d.title, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 2, lineHeight = 17.sp
+                        )
+                        Text(
+                            Format.dot(d.label, sizeText(d.bytes).removePrefix("~")),
+                            color = c.muted, fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+            if (downloads.isNotEmpty()) item(key = "tipD") { Tip("Chạm để mở, nhấn giữ để xoá. Tệp nằm trong thư mục Movies/LucBao và Music/LucBao.") }
         } else if (tab == 2) {
             if (channels.isEmpty()) {
                 item(key = "emptyC") {
@@ -207,6 +289,23 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
         ChannelSheet(ch.url, ch.name, ch.avatar, onDismiss = { openChannel = null }, onPlay = onPlay)
     }
 
+    deleting?.let { d ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Xoá tệp đã tải?") },
+            text = { Text(d.title) },
+            confirmButton = {
+                TextButton(onClick = {
+                    MediaSaver.delete(context, d.uri, d.path)
+                    Library.removeDownload(d)
+                    deleting = null
+                }) { Text("Xoá") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Huỷ") } },
+            containerColor = c.card
+        )
+    }
+
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
@@ -218,6 +317,15 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Huỷ") } },
             containerColor = c.card
         )
+    }
+}
+
+private fun openDownload(context: android.content.Context, d: DownloadEntry) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+        .setDataAndType(android.net.Uri.parse(d.uri), d.mime)
+        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }.onFailure {
+        android.widget.Toast.makeText(context, "Không có ứng dụng mở được tệp này", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
