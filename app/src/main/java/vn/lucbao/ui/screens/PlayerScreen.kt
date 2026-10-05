@@ -472,11 +472,20 @@ private fun VideoArea(
                     }
                 }
 
+                val upNext = ui.related.firstOrNull()
+                val showMore = fullscreen && !panelOpen && upNext != null
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .padding(start = 12.dp, end = 4.dp, bottom = if (fullscreen) 12.dp else 0.dp),
+                        .padding(
+                            start = 12.dp, end = 4.dp,
+                            bottom = when {
+                                showMore -> 58.dp
+                                fullscreen -> 12.dp
+                                else -> 0.dp
+                            }
+                        ),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val live = ui.video?.live == true || ui.details?.live == true
@@ -512,28 +521,23 @@ private fun VideoArea(
                     )
                 }
 
-                val upNext = ui.related.firstOrNull()
-                if (fullscreen && !panelOpen && upNext != null) {
+                if (showMore && upNext != null) {
+                    // YouTube-style: "Nhiều video hơn" + thumbnail, under the seek bar on the right.
                     Row(
                         Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = 14.dp, bottom = 72.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(end = 16.dp, bottom = 10.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { onMore() }
-                            .padding(6.dp),
+                            .padding(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Thumb(upNext.thumbnail, Modifier.width(96.dp), corner = 8.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text("Nhiều video hơn", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                upNext.title, color = Color.White.copy(alpha = 0.75f), fontSize = 10.5.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(140.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Nhiều video hơn", color = Color.White, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Thumb(upNext.thumbnail, Modifier.width(76.dp), corner = 6.dp)
                     }
                 }
             }

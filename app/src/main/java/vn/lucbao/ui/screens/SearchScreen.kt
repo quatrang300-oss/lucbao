@@ -52,6 +52,7 @@ import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.LoadingBox
 import vn.lucbao.ui.components.VideoRow
 import vn.lucbao.ui.theme.Luc
+import vn.lucbao.ui.theme.Roboto
 import vn.lucbao.ui.theme.LucIcons
 
 @Composable
@@ -113,7 +114,7 @@ fun SearchScreen(vm: AppViewModel, focusSignal: Int, onPlay: (Video) -> Unit, on
                             value = query,
                             onValueChange = vm::onQueryChange,
                             singleLine = true,
-                            textStyle = TextStyle(color = c.text, fontSize = 14.sp),
+                            textStyle = TextStyle(color = c.text, fontSize = 14.sp, fontFamily = Roboto),
                             cursorBrush = SolidColor(c.primary),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { go(query) }),

@@ -9,8 +9,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import vn.lucbao.R
 
 @Immutable
 data class LucColors(
@@ -61,19 +65,42 @@ object Luc {
         @Composable get() = LocalLuc.current
 }
 
-// The phone's own system font is used everywhere (custom fonts rendered badly on some
-// phones). Only the "Lục Bảo" wordmark keeps its look, drawn as an image (Wordmark.kt).
+/**
+ * Roboto (static files, full Vietnamese coverage) bundled with the app so text looks the
+ * same on every phone — some phones' own fonts render Vietnamese accents badly.
+ * The "Lục Bảo" wordmark is drawn as an image (Wordmark.kt).
+ */
+val Roboto = FontFamily(
+    Font(R.font.roboto_regular, FontWeight.Normal),
+    Font(R.font.roboto_medium, FontWeight.Medium),
+    Font(R.font.roboto_semibold, FontWeight.SemiBold),
+    Font(R.font.roboto_bold, FontWeight.Bold),
+)
+
 private val base = Typography()
 
+private fun TextStyle.roboto(weight: FontWeight? = null, size: Float? = null) = copy(
+    fontFamily = Roboto,
+    fontWeight = weight ?: fontWeight,
+    fontSize = size?.sp ?: fontSize,
+)
+
 val LucTypography = Typography(
-    displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, fontSize = 32.sp),
-    headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
-    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
-    titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
-    titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-    bodyLarge = base.bodyLarge.copy(fontSize = 15.sp),
-    bodyMedium = base.bodyMedium.copy(fontSize = 13.sp),
-    bodySmall = base.bodySmall.copy(fontSize = 11.5.sp),
+    displayLarge = base.displayLarge.roboto(),
+    displayMedium = base.displayMedium.roboto(),
+    displaySmall = base.displaySmall.roboto(FontWeight.Bold, 32f),
+    headlineLarge = base.headlineLarge.roboto(),
+    headlineMedium = base.headlineMedium.roboto(),
+    headlineSmall = base.headlineSmall.roboto(FontWeight.Bold, 22f),
+    titleLarge = base.titleLarge.roboto(FontWeight.Bold, 20f),
+    titleMedium = base.titleMedium.roboto(FontWeight.SemiBold, 17f),
+    titleSmall = base.titleSmall.roboto(FontWeight.SemiBold, 14f),
+    bodyLarge = base.bodyLarge.roboto(size = 15f),
+    bodyMedium = base.bodyMedium.roboto(size = 13f),
+    bodySmall = base.bodySmall.roboto(size = 11.5f),
+    labelLarge = base.labelLarge.roboto(),
+    labelMedium = base.labelMedium.roboto(),
+    labelSmall = base.labelSmall.roboto(),
 )
 
 @Composable
