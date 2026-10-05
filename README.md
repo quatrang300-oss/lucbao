@@ -11,6 +11,10 @@
 - Tìm kiếm có gợi ý. Dán link YouTube hoặc bấm *Chia sẻ → Lục Bảo* từ Zalo, Messenger, trình duyệt… để mở thẳng video.
 - **Lịch sử** có thanh tiến độ (mở lại là xem tiếp đúng chỗ đang dừng) và **Yêu thích**. Mọi thứ lưu trên máy, không cần tài khoản.
 - Tốc độ phát 0,75×–2×, tự phát video tiếp theo, chạm đúp hai bên video để tua 10 giây.
+- **Theo dõi kênh không cần tài khoản**: video mới của các kênh đang theo dõi luôn hiện đầu tiên ở Trang chủ (mục *Dành cho bạn* và *Đang theo dõi*). Danh sách chỉ lưu trên máy.
+- **Khoá màn hình cho trẻ em**: chặn mọi thao tác trên trình phát; nhấn giữ biểu tượng ổ khoá 1,5 giây để mở.
+- Khi xem toàn màn hình: nút **Nhiều video hơn** mở danh sách video khác ở 1/3 bên phải, video vẫn phát ở 2/3 bên trái.
+- Dùng phông chữ hệ thống của điện thoại để chữ tiếng Việt luôn hiển thị đúng; riêng chữ "Lục Bảo" được vẽ thành hình.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
 ## Tự cập nhật hoạt động thế nào

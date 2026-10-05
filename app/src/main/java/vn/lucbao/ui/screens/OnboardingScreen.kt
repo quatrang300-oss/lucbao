@@ -34,7 +34,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -45,7 +44,7 @@ import vn.lucbao.ui.components.PillButton
 import vn.lucbao.ui.theme.LeafLogo
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
-import vn.lucbao.ui.theme.Playfair
+import vn.lucbao.ui.theme.Wordmark
 
 /** Shown once: explains the app and asks for the two permissions that make it hands-free. */
 @Composable
@@ -71,10 +70,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(40.dp))
         LeafLogo(84.dp)
         Spacer(Modifier.height(14.dp))
-        Row {
-            Text("Lục ", fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 38.sp, color = c.text)
-            Text("Bảo", fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic, fontSize = 38.sp, color = c.primary)
-        }
+        Wordmark(40.dp, c.text, c.primary)
+        Spacer(Modifier.height(6.dp))
         Text(
             "Xem YouTube trọn vẹn — không một quảng cáo.",
             color = c.muted, fontSize = 14.sp, textAlign = TextAlign.Center

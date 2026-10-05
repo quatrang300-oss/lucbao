@@ -38,17 +38,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import vn.lucbao.data.Channel
 import vn.lucbao.data.Format
 import vn.lucbao.data.HistoryEntry
 import vn.lucbao.data.Library
 import vn.lucbao.data.Video
+import vn.lucbao.ui.components.Avatar
+import vn.lucbao.ui.components.ChannelSheet
 import vn.lucbao.ui.components.EmptyState
+import vn.lucbao.ui.components.FollowButton
 import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.VideoCard
 import vn.lucbao.ui.components.VideoRow
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
-import vn.lucbao.ui.theme.Playfair
 import java.util.Calendar
 
 @Composable
@@ -56,6 +59,8 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
     val c = Luc.colors
     val history by Library.history.collectAsStateWithLifecycle()
     val favorites by Library.favorites.collectAsStateWithLifecycle()
+    val channels by Library.channels.collectAsStateWithLifecycle()
+    var openChannel by remember { mutableStateOf<Channel?>(null) }
     var tab by rememberSaveable { mutableStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -70,7 +75,7 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Thư viện", fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 24.sp,
+                    "Thư viện", fontWeight = FontWeight.SemiBold, fontSize = 24.sp,
                     color = c.text, modifier = Modifier.weight(1f)
                 )
                 Box {
@@ -93,7 +98,7 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                     .background(c.surface2)
                     .padding(4.dp)
             ) {
-                listOf(LucIcons.History to "Lịch sử", LucIcons.Heart to "Yêu thích").forEachIndexed { i, (icon, label) ->
+                listOf(LucIcons.History to "Lịch sử", LucIcons.Heart to "Yêu thích", LucIcons.PersonAdd to "Kênh").forEachIndexed { i, (icon, label) ->
                     val on = tab == i
                     Row(
                         Modifier
@@ -125,6 +130,9 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 if (tab == 0) {
                     Stat(history.size.toString(), "video đã xem", Modifier.weight(1f))
                     Stat(Format.hours(weekMs), "xem tuần này", Modifier.weight(1f))
+                } else if (tab == 2) {
+                    Stat(channels.size.toString(), "kênh đang theo dõi", Modifier.weight(1f))
+                    Stat("Riêng tư", "không cần tài khoản", Modifier.weight(1f))
                 } else {
                     Stat(favorites.size.toString(), "video yêu thích", Modifier.weight(1f))
                     Stat("Riêng tư", "chỉ lưu trên máy", Modifier.weight(1f))
@@ -154,6 +162,33 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 }
             }
             if (history.isNotEmpty()) item(key = "tipH") { Tip("Nhấn giữ một video để xoá khỏi lịch sử.") }
+        } else if (tab == 2) {
+            if (channels.isEmpty()) {
+                item(key = "emptyC") {
+                    EmptyState(
+                        "Chưa theo dõi kênh nào",
+                        "Khi xem video, bấm “Theo dõi” cạnh tên kênh. Video mới của kênh sẽ luôn hiện đầu tiên ở Trang chủ."
+                    )
+                }
+            }
+            itemsIndexed(channels, key = { i, ch -> "c-$i-${ch.url}" }) { _, ch ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { openChannel = ch }
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Avatar(ch.name, 42.dp, ch.avatar)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        ch.name, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, modifier = Modifier.weight(1f)
+                    )
+                    FollowButton(ch.url, ch.name, ch.avatar)
+                }
+            }
+            if (channels.isNotEmpty()) item(key = "tipC") { Tip("Chỉ lưu trên máy này. Xoá dữ liệu hoặc gỡ ứng dụng sẽ mất danh sách.") }
         } else {
             if (favorites.isEmpty()) {
                 item(key = "emptyF") {
@@ -166,6 +201,10 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
             if (favorites.isNotEmpty()) item(key = "tipF") { Tip("Nhấn giữ một video để bỏ khỏi Yêu thích.") }
         }
         item(key = "pad") { Spacer(Modifier.height(16.dp)) }
+    }
+
+    openChannel?.let { ch ->
+        ChannelSheet(ch.url, ch.name, ch.avatar, onDismiss = { openChannel = null }, onPlay = onPlay)
     }
 
     if (confirmClear) {
@@ -212,7 +251,7 @@ private fun Stat(value: String, label: String, modifier: Modifier) {
             .border(1.dp, c.line, RoundedCornerShape(14.dp))
             .padding(12.dp)
     ) {
-        Text(value, fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 21.sp, color = c.text)
+        Text(value, fontWeight = FontWeight.SemiBold, fontSize = 21.sp, color = c.text)
         Text(label, color = c.muted, fontSize = 11.sp)
     }
 }

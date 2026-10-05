@@ -89,10 +89,17 @@ fun MiniPlayer(ui: PlayerUi, onExpand: () -> Unit) {
 }
 
 @Composable
-fun IconTap(icon: ImageVector, desc: String, size: Int = 24, tint: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
+fun IconTap(
+    icon: ImageVector,
+    desc: String,
+    size: Int = 24,
+    tint: androidx.compose.ui.graphics.Color? = null,
+    box: Int = 40,
+    onClick: () -> Unit,
+) {
     Box(
         Modifier
-            .size(40.dp)
+            .size(box.dp)
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center

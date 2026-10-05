@@ -54,7 +54,6 @@ import vn.lucbao.ui.components.LucChip
 import vn.lucbao.ui.components.PillButton
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
-import vn.lucbao.ui.theme.Playfair
 import vn.lucbao.update.Updater
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -102,7 +101,7 @@ fun SettingsScreen() {
             .padding(bottom = 24.dp)
     ) {
         Text(
-            "Cài đặt", fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 24.sp,
+            "Cài đặt", fontWeight = FontWeight.SemiBold, fontSize = 24.sp,
             color = c.text, modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 8.dp)
         )
 
@@ -172,9 +171,6 @@ fun SettingsScreen() {
             }
         }
 
-        Card("Giới thiệu") {
-            Body("Lục Bảo là ứng dụng mã nguồn mở (GPLv3), dùng thư viện NewPipeExtractor. Không thu thập dữ liệu, không quảng cáo, không cần tài khoản. Lục Bảo không thuộc YouTube hay Google.")
-        }
     }
 }
 
@@ -190,7 +186,7 @@ private fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
             .border(1.dp, c.line, RoundedCornerShape(18.dp))
             .padding(16.dp)
     ) {
-        Text(title, fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = c.text)
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = c.text)
         Spacer(Modifier.height(10.dp))
         content()
     }

@@ -31,11 +31,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import vn.lucbao.data.Library
 import vn.lucbao.data.Video
 import vn.lucbao.ui.AppViewModel
 import vn.lucbao.ui.FeedState
@@ -46,10 +46,9 @@ import vn.lucbao.ui.components.LoadingBox
 import vn.lucbao.ui.components.LucChip
 import vn.lucbao.ui.components.SectionTitle
 import vn.lucbao.ui.components.VideoCard
-import vn.lucbao.ui.theme.LeafLogo
+import vn.lucbao.ui.theme.BrandMark
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
-import vn.lucbao.ui.theme.Playfair
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +58,10 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
     val selected by vm.selected.collectAsStateWithLifecycle()
     val feeds by vm.feeds.collectAsStateWithLifecycle()
     val feed = feeds[selected] ?: FeedState(loading = true)
-    val chips = listOf(AppViewModel.FOR_YOU to "Dành cho bạn") + kiosks.map { it.id to it.name }
+    val channels by Library.channels.collectAsStateWithLifecycle()
+    val chips = listOf(AppViewModel.FOR_YOU to "Dành cho bạn") +
+        (if (channels.isNotEmpty()) listOf(AppViewModel.FOLLOWING to "Đang theo dõi") else emptyList()) +
+        kiosks.map { it.id to it.name }
     val title = chips.firstOrNull { it.first == selected }?.second ?: ""
     val listState = rememberLazyListState()
 
@@ -87,13 +89,7 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
                         .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    LeafLogo(28.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Lục ", fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 23.sp, color = c.text)
-                    Text(
-                        "Bảo", fontFamily = Playfair, fontWeight = FontWeight.SemiBold,
-                        fontStyle = FontStyle.Italic, fontSize = 23.sp, color = c.primary
-                    )
+                    BrandMark(24.dp)
                     Spacer(Modifier.weight(1f))
                     Row(
                         Modifier
@@ -146,7 +142,11 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
                 }
                 items.isEmpty() && (feed.loading || !feed.loaded) -> item(key = "loading") { LoadingBox() }
                 items.isEmpty() -> item(key = "empty") {
-                    EmptyState("Chưa có gì ở đây", "Kéo xuống để tải lại nhé.")
+                    if (selected == AppViewModel.FOLLOWING) {
+                        EmptyState("Chưa có video mới", "Các kênh bạn theo dõi chưa đăng video nào trong 2 tháng qua.")
+                    } else {
+                        EmptyState("Chưa có gì ở đây", "Kéo xuống để tải lại nhé.")
+                    }
                 }
                 else -> {
                     item(key = "hero") { HeroCard(items[0]) { onPlay(items[0]) } }

@@ -16,6 +16,14 @@ data class HistoryEntry(
     val watchedAt: Long,
 )
 
+/** A channel followed on this phone (no account). */
+data class Channel(
+    val url: String,
+    val name: String,
+    val avatar: String?,
+    val addedAt: Long,
+)
+
 data class FavoriteEntry(
     val video: Video,
     val addedAt: Long,
@@ -33,6 +41,9 @@ object Library {
     private val _favorites = MutableStateFlow<List<FavoriteEntry>>(emptyList())
     val favorites: StateFlow<List<FavoriteEntry>> = _favorites.asStateFlow()
 
+    private val _channels = MutableStateFlow<List<Channel>>(emptyList())
+    val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
+
     fun init(context: Context) {
         file = File(context.filesDir, "library.json")
         runCatching {
@@ -43,6 +54,12 @@ object Library {
                 }
                 _favorites.value = root.optJSONArray("favorites").toList { o ->
                     FavoriteEntry(o.getJSONObject("v").toVideo(), o.optLong("t"))
+                }
+                _channels.value = root.optJSONArray("channels").toList { o ->
+                    Channel(
+                        o.getString("url"), o.optString("name"),
+                        o.optString("avatar").ifEmpty { null }, o.optLong("t")
+                    )
                 }
             }
         }
@@ -100,9 +117,28 @@ object Library {
         save()
     }
 
+    private fun channelKey(url: String) = url.trimEnd('/').substringAfterLast('/')
+
+    fun isFollowing(channelUrl: String?): Boolean {
+        if (channelUrl.isNullOrBlank()) return false
+        val key = channelKey(channelUrl)
+        return _channels.value.any { channelKey(it.url) == key }
+    }
+
+    fun toggleFollow(channelUrl: String, name: String, avatar: String?) {
+        val key = channelKey(channelUrl)
+        _channels.value = if (isFollowing(channelUrl)) {
+            _channels.value.filterNot { channelKey(it.url) == key }
+        } else {
+            listOf(Channel(channelUrl, name, avatar, System.currentTimeMillis())) + _channels.value
+        }
+        save()
+    }
+
     private fun save() {
         val h = _history.value
         val f = _favorites.value
+        val ch = _channels.value
         io.execute {
             runCatching {
                 val root = JSONObject()
@@ -114,6 +150,12 @@ object Library {
                 })
                 root.put("favorites", JSONArray().apply {
                     f.forEach { put(JSONObject().put("v", it.video.toJson()).put("t", it.addedAt)) }
+                })
+                root.put("channels", JSONArray().apply {
+                    ch.forEach {
+                        put(JSONObject().put("url", it.url).put("name", it.name)
+                            .put("avatar", it.avatar ?: "").put("t", it.addedAt))
+                    }
                 })
                 val tmp = File(file.parentFile, "library.json.tmp")
                 tmp.writeText(root.toString())

@@ -6,12 +6,22 @@ import android.content.Intent
 import android.graphics.Color as AColor
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.pointer.PointerEventType
+import kotlinx.coroutines.launch
+import vn.lucbao.ui.components.Thumb
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +86,8 @@ import vn.lucbao.player.PlayerUi
 import vn.lucbao.player.Quality
 import vn.lucbao.player.QualityChoice
 import vn.lucbao.ui.components.Avatar
+import vn.lucbao.ui.components.ChannelSheet
+import vn.lucbao.ui.components.FollowButton
 import vn.lucbao.ui.components.IconTap
 import vn.lucbao.ui.components.PillButton
 import vn.lucbao.ui.components.SectionTitle
@@ -93,6 +105,8 @@ private fun speedLabel(s: Float): String =
 fun PlayerScreen(
     ui: PlayerUi,
     fullscreen: Boolean,
+    locked: Boolean,
+    onLockChange: (Boolean) -> Unit,
     onCollapse: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onPip: () -> Unit,
@@ -100,29 +114,177 @@ fun PlayerScreen(
 ) {
     val c = Luc.colors
     var showQuality by remember { mutableStateOf(false) }
+    var morePanel by remember { mutableStateOf(false) }
+    LaunchedEffect(fullscreen) { if (!fullscreen) morePanel = false }
+    BackHandler(enabled = morePanel && !locked) { morePanel = false }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(if (fullscreen) Color.Black else c.surface)
-    ) {
-        if (!fullscreen) Box(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding())
-        VideoArea(
-            ui = ui,
-            fullscreen = fullscreen,
-            modifier = if (fullscreen) Modifier.fillMaxSize()
-            else Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-            onCollapse = onCollapse,
-            onToggleFullscreen = onToggleFullscreen,
-            onQuality = { showQuality = true },
-        )
-        if (!fullscreen) Details(ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true })
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(if (fullscreen) Color.Black else c.surface)
+        ) {
+            if (!fullscreen) Box(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding())
+            // One VideoArea call site so the video view is kept when entering/leaving fullscreen.
+            Row(
+                if (fullscreen) Modifier.fillMaxSize()
+                else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+            ) {
+                VideoArea(
+                    ui = ui,
+                    fullscreen = fullscreen,
+                    panelOpen = morePanel,
+                    modifier = Modifier.weight(if (fullscreen && morePanel) 2f else 1f).fillMaxHeight(),
+                    onCollapse = onCollapse,
+                    onToggleFullscreen = onToggleFullscreen,
+                    onQuality = { showQuality = true },
+                    onLock = { onLockChange(true) },
+                    onMore = { morePanel = true },
+                )
+                if (fullscreen && morePanel) {
+                    RelatedPanel(
+                        ui = ui,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        onClose = { morePanel = false },
+                        onPlay = onPlay,
+                    )
+                }
+            }
+            if (!fullscreen) Details(ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true })
+        }
+        if (locked) LockOverlay(fullscreen = fullscreen, onUnlock = { onLockChange(false) })
     }
 
-    if (showQuality && ui.choices.isNotEmpty()) {
+    if (showQuality && ui.choices.isNotEmpty() && !locked) {
         QualitySheet(ui, onDismiss = { showQuality = false }) {
             PlayerController.setQuality(it)
             showQuality = false
+        }
+    }
+}
+
+/**
+ * Child lock: swallows every touch on the player. Unlocking needs the lock button to be
+ * held for 1.5 seconds, which small children rarely do by accident.
+ */
+@Composable
+private fun LockOverlay(fullscreen: Boolean, onUnlock: () -> Unit) {
+    val c = Luc.colors
+    val scope = rememberCoroutineScope()
+    var hint by remember { mutableIntStateOf(1) }
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(hint) {
+        if (hint > 0) {
+            delay(3000)
+            if (progress.value == 0f) hint = 0
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        if (e.type == PointerEventType.Press) hint++
+                        e.changes.forEach { it.consume() }
+                    }
+                }
+            }
+    ) {
+        AnimatedVisibility(
+            visible = hint > 0,
+            enter = fadeIn(), exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .then(if (fullscreen) Modifier else Modifier.statusBarsPadding())
+                .padding(10.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.End) {
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                val job = scope.launch {
+                                    progress.animateTo(1f, tween(1500))
+                                    onUnlock()
+                                }
+                                do {
+                                    val ev = awaitPointerEvent()
+                                    ev.changes.forEach { it.consume() }
+                                } while (ev.changes.any { it.pressed })
+                                if (progress.value < 1f) {
+                                    job.cancel()
+                                    scope.launch { progress.snapTo(0f) }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { progress.value },
+                        color = c.primary,
+                        trackColor = Color.Transparent,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(52.dp)
+                    )
+                    Icon(LucIcons.Lock, "Mở khoá", tint = Color.White, modifier = Modifier.size(26.dp))
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Nhấn giữ để mở khoá",
+                    color = Color.White, fontSize = 11.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/** Right-hand list shown next to the video in fullscreen ("Nhiều video hơn"). */
+@Composable
+private fun RelatedPanel(ui: PlayerUi, modifier: Modifier, onClose: () -> Unit, onPlay: (Video) -> Unit) {
+    Column(modifier.background(Color(0xF2071A13))) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Video khác", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            IconTap(LucIcons.Close, "Đóng", size = 22, tint = Color.White, onClick = onClose)
+        }
+        LazyColumn(Modifier.fillMaxSize()) {
+            itemsIndexed(ui.related, key = { i, r -> "p$i-${r.url}" }) { _, r ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlay(r) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Thumb(r.thumbnail, Modifier.width(112.dp), r.duration, r.live, corner = 8.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            r.title, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp,
+                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            r.channel, color = Color.White.copy(alpha = 0.65f), fontSize = 10.5.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            item(key = "pad") { Spacer(Modifier.height(16.dp)) }
         }
     }
 }
@@ -152,10 +314,13 @@ fun VideoSurface(modifier: Modifier = Modifier) {
 private fun VideoArea(
     ui: PlayerUi,
     fullscreen: Boolean,
+    panelOpen: Boolean,
     modifier: Modifier,
     onCollapse: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onQuality: () -> Unit,
+    onLock: () -> Unit,
+    onMore: () -> Unit,
 ) {
     val c = Luc.colors
     val exo = PlayerController.exo
@@ -266,14 +431,18 @@ private fun VideoArea(
                     ui.quality?.let { q ->
                         Text(
                             if (q.audioOnly) "Âm thanh" else q.label,
-                            color = Color(0xFF04140D), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xE63DDC97))
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(Color(0x333DDC97))
                                 .clickable(onClick = onQuality)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    IconTap(LucIcons.Lock, "Khoá màn hình", size = 22, tint = Color.White) {
+                        controls = false
+                        onLock()
                     }
                 }
 
@@ -338,8 +507,34 @@ private fun VideoArea(
                     }
                     IconTap(
                         if (fullscreen) LucIcons.FullscreenExit else LucIcons.Fullscreen,
-                        "Toàn màn hình", size = 22, tint = Color.White, onClick = onToggleFullscreen
+                        "Toàn màn hình", size = 33, tint = Color.White, box = 52,
+                        onClick = onToggleFullscreen
                     )
+                }
+
+                val upNext = ui.related.firstOrNull()
+                if (fullscreen && !panelOpen && upNext != null) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 14.dp, bottom = 72.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { onMore() }
+                            .padding(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Thumb(upNext.thumbnail, Modifier.width(96.dp), corner = 8.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Nhiều video hơn", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                upNext.title, color = Color.White.copy(alpha = 0.75f), fontSize = 10.5.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(140.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
                 }
             }
         }
@@ -354,6 +549,8 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
     val v = ui.video ?: return
     val settings by Prefs.state.collectAsStateWithLifecycle()
     var expanded by remember(v.url) { mutableStateOf(false) }
+    var channelSheet by remember { mutableStateOf(false) }
+    val channelUrl = d?.channelUrl ?: v.channelUrl
 
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "info") {
@@ -387,7 +584,10 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
         }
         item(key = "channel") {
             Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = channelUrl != null) { channelSheet = true }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Avatar(v.channel, 36.dp, d?.channelAvatar)
@@ -398,6 +598,9 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
                     if (subs > 0) {
                         Text("${Format.count(subs)} người theo dõi", color = c.muted, fontSize = 11.sp)
                     }
+                }
+                if (channelUrl != null && v.channel.isNotBlank()) {
+                    FollowButton(channelUrl, v.channel, d?.channelAvatar)
                 }
             }
         }
@@ -448,6 +651,13 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
             VideoRow(r, onClick = { onPlay(r) })
         }
         item(key = "pad") { Spacer(Modifier.height(24.dp)) }
+    }
+
+    if (channelSheet && channelUrl != null) {
+        ChannelSheet(
+            url = channelUrl, name = v.channel, avatar = d?.channelAvatar,
+            onDismiss = { channelSheet = false }, onPlay = onPlay
+        )
     }
 }
 

@@ -33,6 +33,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -313,6 +317,8 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
     val nav by vm.nav.collectAsStateWithLifecycle()
     val ui by PlayerController.ui.collectAsStateWithLifecycle()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // Declared before the picture-in-picture branch so the child lock survives PiP.
+    var locked by rememberSaveable { mutableStateOf(false) }
 
     if (nav.pip) {
         Box(Modifier.fillMaxSize().background(Color.Black)) { VideoSurface(Modifier.fillMaxSize()) }
@@ -324,6 +330,7 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
         vm.nav.update { it.copy(playerExpanded = true) }
     }
     val expanded = nav.playerExpanded && ui.video != null
+    LaunchedEffect(ui.video == null) { if (ui.video == null) locked = false }
     val fullscreen = expanded && (nav.fullscreen || landscape)
 
     LaunchedEffect(fullscreen) { actions.onFullscreenShown(fullscreen) }
@@ -354,6 +361,8 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
             PlayerScreen(
                 ui = ui,
                 fullscreen = fullscreen,
+                locked = locked,
+                onLockChange = { locked = it },
                 onCollapse = { vm.nav.update { it.copy(playerExpanded = false) } },
                 onToggleFullscreen = actions.onToggleFullscreen,
                 onPip = actions.onPip,
@@ -367,4 +376,6 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
         else vm.nav.update { it.copy(playerExpanded = false) }
     }
     BackHandler(enabled = !expanded && nav.tab != Tab.HOME) { vm.go(Tab.HOME) }
+    // Child lock: the back gesture does nothing until the screen is unlocked.
+    BackHandler(enabled = expanded && locked) { }
 }

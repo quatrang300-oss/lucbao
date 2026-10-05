@@ -9,13 +9,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import vn.lucbao.R
 
 @Immutable
 data class LucColors(
@@ -66,35 +61,19 @@ object Luc {
         @Composable get() = LocalLuc.current
 }
 
-val Playfair = FontFamily(
-    Font(R.font.playfair_display, FontWeight.Normal),
-    Font(R.font.playfair_display, FontWeight.SemiBold),
-    Font(R.font.playfair_display, FontWeight.Bold),
-    Font(R.font.playfair_display_italic, FontWeight.Medium, FontStyle.Italic),
-    Font(R.font.playfair_display_italic, FontWeight.SemiBold, FontStyle.Italic),
-)
-
-val BeVietnam = FontFamily(
-    Font(R.font.be_vietnam_pro_regular, FontWeight.Normal),
-    Font(R.font.be_vietnam_pro_medium, FontWeight.Medium),
-    Font(R.font.be_vietnam_pro_semibold, FontWeight.SemiBold),
-    Font(R.font.be_vietnam_pro_bold, FontWeight.Bold),
-)
-
+// The phone's own system font is used everywhere (custom fonts rendered badly on some
+// phones). Only the "Lục Bảo" wordmark keeps its look, drawn as an image (Wordmark.kt).
 private val base = Typography()
 
 val LucTypography = Typography(
-    displaySmall = TextStyle(fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 34.sp),
-    headlineSmall = TextStyle(fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 22.sp),
-    titleLarge = TextStyle(fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 20.sp),
-    titleMedium = TextStyle(fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
-    titleSmall = TextStyle(fontFamily = BeVietnam, fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-    bodyLarge = base.bodyLarge.copy(fontFamily = BeVietnam, fontSize = 15.sp),
-    bodyMedium = base.bodyMedium.copy(fontFamily = BeVietnam, fontSize = 13.sp),
-    bodySmall = base.bodySmall.copy(fontFamily = BeVietnam, fontSize = 11.5.sp),
-    labelLarge = base.labelLarge.copy(fontFamily = BeVietnam, fontWeight = FontWeight.SemiBold),
-    labelMedium = base.labelMedium.copy(fontFamily = BeVietnam),
-    labelSmall = base.labelSmall.copy(fontFamily = BeVietnam),
+    displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, fontSize = 32.sp),
+    headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
+    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+    titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
+    titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+    bodyLarge = base.bodyLarge.copy(fontSize = 15.sp),
+    bodyMedium = base.bodyMedium.copy(fontSize = 13.sp),
+    bodySmall = base.bodySmall.copy(fontSize = 11.5.sp),
 )
 
 @Composable

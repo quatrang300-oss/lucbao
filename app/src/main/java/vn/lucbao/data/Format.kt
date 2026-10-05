@@ -36,6 +36,27 @@ object Format {
     fun dot(vararg parts: String?): String =
         parts.filterNot { it.isNullOrBlank() }.joinToString(" · ")
 
+    /** Parses an ISO-8601 instant ("2026-10-03T12:00:00Z"); 0 when it is not one. */
+    fun parseInstant(s: String?): Long {
+        if (s.isNullOrBlank() || s.length < 10 || !s[0].isDigit() || s[4] != '-') return 0
+        return runCatching { java.time.Instant.parse(s).toEpochMilli() }
+            .recoverCatching { java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli() }
+            .getOrDefault(0L)
+    }
+
+    /** "5 phút trước", "3 ngày trước"… */
+    fun ago(millis: Long): String {
+        val diff = (System.currentTimeMillis() - millis).coerceAtLeast(0) / 1000
+        return when {
+            diff < 3600 -> "${(diff / 60).coerceAtLeast(1)} phút trước"
+            diff < 86_400 -> "${diff / 3600} giờ trước"
+            diff < 7 * 86_400 -> "${diff / 86_400} ngày trước"
+            diff < 30 * 86_400 -> "${diff / (7 * 86_400)} tuần trước"
+            diff < 365 * 86_400 -> "${diff / (30 * 86_400)} tháng trước"
+            else -> "${diff / (365 * 86_400)} năm trước"
+        }
+    }
+
     fun hours(ms: Long): String {
         val minutes = ms / 60_000
         return if (minutes < 60) "$minutes phút" else String.format(

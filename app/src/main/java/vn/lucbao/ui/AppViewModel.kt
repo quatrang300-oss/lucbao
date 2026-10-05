@@ -49,6 +49,8 @@ data class FeedState(
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         const val FOR_YOU = "for_you"
+        const val FOLLOWING = "following"
+        private const val FEED_TTL = 20 * 60_000L
     }
 
     private val app: Context get() = getApplication()
@@ -82,9 +84,55 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var suggestJob: Job? = null
     private var searchJob: Job? = null
 
+    /** channel url -> (fetched at, latest videos) */
+    private val channelCache = HashMap<String, Pair<Long, List<Video>>>()
+
     init {
         loadKiosks()
         load(FOR_YOU)
+        // Following / unfollowing a channel refreshes the lists that depend on it.
+        viewModelScope.launch {
+            var first = true
+            Library.channels.collect {
+                if (first) { first = false; return@collect }
+                feedJobs[FOLLOWING]?.cancel()
+                feedJobs[FOR_YOU]?.cancel()
+                _feeds.update { f -> f - FOLLOWING - FOR_YOU }
+                if (_selected.value == FOLLOWING && it.isEmpty()) _selected.value = FOR_YOU
+                if (_selected.value == FOR_YOU || _selected.value == FOLLOWING) load(_selected.value)
+            }
+        }
+    }
+
+    /**
+     * Newest uploads of the followed channels, newest first.
+     * @param maxAgeDays only videos uploaded within this many days
+     */
+    private suspend fun followedVideos(maxAgeDays: Int): List<Video> {
+        val channels = Library.channels.value
+        if (channels.isEmpty()) return emptyList()
+        val engine = EngineManager.get()
+        val now = System.currentTimeMillis()
+        val all = ArrayList<Video>()
+        for (group in channels.chunked(6)) {
+            all += coroutineScope {
+                group.map { ch ->
+                    async(Dispatchers.IO) {
+                        val cached = synchronized(channelCache) { channelCache[ch.url] }
+                        if (cached != null && now - cached.first < FEED_TTL) return@async cached.second
+                        val list = runCatching {
+                            engine.kiosk("feed:" + ch.url, null).items.map { it.toVideo().copy(followed = true) }
+                        }.getOrDefault(emptyList())
+                        if (list.isNotEmpty()) synchronized(channelCache) { channelCache[ch.url] = now to list }
+                        list
+                    }
+                }.awaitAll().flatten()
+            }
+        }
+        val minTime = now - maxAgeDays * 24L * 3600_000L
+        return all.filter { it.publishedAt == 0L || it.publishedAt >= minTime }
+            .sortedByDescending { it.publishedAt }
+            .distinctBy { videoKey(it.url) }
     }
 
     fun go(tab: Tab) = nav.update { it.copy(tab = tab, playerExpanded = false) }
@@ -116,6 +164,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() {
         val id = _selected.value
+        if (id == FOLLOWING || id == FOR_YOU) synchronized(channelCache) { channelCache.clear() }
         feedJobs[id]?.cancel()
         _feeds.update { it - id }
         if (_kiosks.value.isEmpty()) loadKiosks()
@@ -139,7 +188,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val token = if (more) _feeds.value[id]?.next else null
                 val (items, next) = withContext(Dispatchers.IO) {
-                    if (id == FOR_YOU) forYou(token) else {
+                    if (id == FOR_YOU) forYou(token)
+                    else if (id == FOLLOWING) followedVideos(60) to null
+                    else {
                         val feed = EngineManager.get().kiosk(id, token)
                         feed.items.map { it.toVideo() } to feed.nextPageToken
                     }
@@ -166,9 +217,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val feed = engine.kiosk(k, token)
             return feed.items.map { it.toVideo() } to feed.nextPageToken
         }
+        val watched = Library.history.value.take(150).map { videoKey(it.video.url) }.toSet()
+        // New uploads of followed channels always come first.
+        val fresh = followedVideos(14).filter { videoKey(it.url) !in watched }.take(30)
         val seeds = Library.history.value.take(4).map { it.video.url }
         if (seeds.isNotEmpty()) {
-            val watched = Library.history.value.take(150).map { videoKey(it.video.url) }.toSet()
             val lists = coroutineScope {
                 seeds.map { url ->
                     async(Dispatchers.IO) {
@@ -180,15 +233,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val mixed = ArrayList<Video>()
             val max = lists.maxOfOrNull { it.size } ?: 0
             for (i in 0 until max) for (l in lists) if (i < l.size) mixed.add(l[i])
-            val result = mixed.filter { videoKey(it.url) !in watched && !it.live }
+            val result = (fresh + mixed.filter { videoKey(it.url) !in watched && !it.live })
                 .distinctBy { videoKey(it.url) }
-            if (result.size >= 6) return result to null
+            if (result.size >= 6 + fresh.size) return result to null
         }
         val kiosks = _kiosks.value.ifEmpty { engine.kiosks() }
-        val k = kiosks.firstOrNull()?.id ?: return emptyList<Video>() to null
+        val k = kiosks.firstOrNull()?.id ?: return fresh to null
         forYouFallback = k
         val feed = engine.kiosk(k, null)
-        return feed.items.map { it.toVideo() } to feed.nextPageToken
+        return (fresh + feed.items.map { it.toVideo() }).distinctBy { videoKey(it.url) } to feed.nextPageToken
     }
 
     // ------------------------------------------------------------------ search

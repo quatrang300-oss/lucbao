@@ -15,19 +15,27 @@ data class Video(
     val uploaded: String? = null,
     val live: Boolean = false,
     val channelUrl: String? = null,
+    /** upload time in ms when known exactly (channel feeds), else 0 */
+    val publishedAt: Long = 0,
+    /** from a channel the user follows */
+    val followed: Boolean = false,
 )
 
-fun VideoItem.toVideo() = Video(
-    url = url,
-    title = title ?: "",
-    channel = channel ?: "",
-    thumbnail = thumbnail,
-    duration = duration,
-    views = views,
-    uploaded = uploaded,
-    live = live,
-    channelUrl = channelUrl,
-)
+fun VideoItem.toVideo(): Video {
+    val published = Format.parseInstant(uploaded)
+    return Video(
+        url = url,
+        title = title ?: "",
+        channel = channel ?: "",
+        thumbnail = thumbnail,
+        duration = duration,
+        views = views,
+        uploaded = if (published > 0) Format.ago(published) else uploaded,
+        live = live,
+        channelUrl = channelUrl,
+        publishedAt = published,
+    )
+}
 
 fun VideoDetails.toVideo() = Video(
     url = url,

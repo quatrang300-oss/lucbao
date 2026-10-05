@@ -44,7 +44,6 @@ import vn.lucbao.data.Format
 import vn.lucbao.data.Video
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
-import vn.lucbao.ui.theme.Playfair
 
 fun errorText(kind: Int?): String = when (kind) {
     ErrorKind.NETWORK -> "Không có kết nối mạng. Kiểm tra Wi-Fi hoặc 4G rồi thử lại."
@@ -135,6 +134,15 @@ fun Avatar(name: String, size: Dp = 30.dp, image: String? = null) {
 
 fun metaLine(v: Video): String = Format.dot(v.channel, Format.views(v.views), v.uploaded)
 
+/** Small "following" marker shown on videos from followed channels. */
+@Composable
+fun FollowedTag() {
+    Text(
+        "● Kênh bạn theo dõi", color = Luc.colors.primary, fontSize = 10.5.sp,
+        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp)
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(v: Video, onClick: () -> Unit, progress: Float? = null, onLongClick: (() -> Unit)? = null) {
@@ -158,6 +166,7 @@ fun VideoCard(v: Video, onClick: () -> Unit, progress: Float? = null, onLongClic
                     metaLine(v), color = c.muted, fontSize = 11.5.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp)
                 )
+                if (v.followed) FollowedTag()
             }
         }
     }
@@ -184,6 +193,7 @@ fun VideoRow(v: Video, onClick: () -> Unit, progress: Float? = null, onLongClick
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             val sub = Format.dot(Format.views(v.views), v.uploaded)
             if (sub.isNotEmpty()) Text(sub, color = c.muted, fontSize = 11.sp, maxLines = 1)
+            if (v.followed) FollowedTag()
         }
     }
 }
@@ -224,7 +234,7 @@ fun HeroCard(v: Video, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                v.title, color = Color.White, fontFamily = Playfair, fontWeight = FontWeight.SemiBold,
+                v.title, color = Color.White, fontWeight = FontWeight.SemiBold,
                 fontSize = 18.sp, lineHeight = 23.sp, maxLines = 3, overflow = TextOverflow.Ellipsis
             )
             Text(
@@ -269,7 +279,7 @@ fun SectionTitle(title: String, action: String? = null, onAction: (() -> Unit)? 
             .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        Text(title, fontFamily = Playfair, fontWeight = FontWeight.SemiBold, fontSize = 17.sp,
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 17.sp,
             color = c.text, modifier = Modifier.weight(1f))
         if (action != null) {
             Text(action, color = c.primary, fontSize = 12.sp,
@@ -326,7 +336,7 @@ fun EmptyState(title: String, body: String) {
         Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(title, fontFamily = Playfair, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+        Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = c.text)
         Text(body, color = c.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 8.dp), lineHeight = 19.sp)
     }

@@ -7,7 +7,12 @@ import org.schabi.newpipe.extractor.NewPipe;
 import org.schabi.newpipe.extractor.Page;
 import org.schabi.newpipe.extractor.ServiceList;
 import org.schabi.newpipe.extractor.StreamingService;
+import org.schabi.newpipe.extractor.channel.ChannelInfo;
+import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo;
+import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs;
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException;
+import org.schabi.newpipe.extractor.feed.FeedExtractor;
+import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler;
 import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException;
 import org.schabi.newpipe.extractor.exceptions.ExtractionException;
 import org.schabi.newpipe.extractor.exceptions.GeographicRestrictionException;
@@ -158,8 +163,14 @@ public final class EngineImpl implements Engine {
         }
     }
 
+    /** Prefix for {@link #kiosk} ids that ask for a channel's latest uploads. */
+    private static final String FEED_PREFIX = "feed:";
+
     @Override
     public Feed kiosk(final String kioskId, final String pageToken) throws Exception {
+        if (kioskId.startsWith(FEED_PREFIX)) {
+            return channelFeed(kioskId.substring(FEED_PREFIX.length()));
+        }
         final KioskList list = yt.getKioskList();
         final ListExtractor.InfoItemsPage<StreamInfoItem> page;
         if (pageToken == null) {
@@ -175,6 +186,53 @@ public final class EngineImpl implements Engine {
             page = ex.getPage(p);
         }
         return toFeed(page.getItems(), page.getNextPage(), null);
+    }
+
+    /**
+     * Latest uploads of a channel (used for following channels without an account).
+     * Upload dates are returned as ISO-8601 instants in {@link VideoItem#uploaded} so the
+     * app can sort videos from many channels by date.
+     */
+    private Feed channelFeed(final String channelUrl) throws Exception {
+        final List<StreamInfoItem> items = new ArrayList<>();
+        try {
+            final FeedExtractor feed = yt.getFeedExtractor(channelUrl);
+            if (feed != null) {
+                feed.fetchPage();
+                items.addAll(feed.getInitialPage().getItems());
+            }
+        } catch (final Exception e) {
+            items.clear();
+        }
+        if (items.isEmpty()) {
+            final ChannelInfo channel = ChannelInfo.getInfo(yt, channelUrl);
+            for (final ListLinkHandler tab : channel.getTabs()) {
+                if (tab.getContentFilters().contains(ChannelTabs.VIDEOS)) {
+                    final ChannelTabInfo tabInfo = ChannelTabInfo.getInfo(yt, tab);
+                    for (final InfoItem item : tabInfo.getRelatedItems()) {
+                        if (item instanceof StreamInfoItem) {
+                            items.add((StreamInfoItem) item);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        final List<VideoItem> out = new ArrayList<>();
+        for (final StreamInfoItem s : items) {
+            final VideoItem v = toItem(s);
+            String uploaded = v.uploaded;
+            try {
+                if (s.getUploadDate() != null) {
+                    uploaded = s.getUploadDate().getInstant().toString();
+                }
+            } catch (final Throwable ignored) {
+                // keep the textual date
+            }
+            out.add(new VideoItem(v.url, v.title, v.channel, v.channelUrl, v.thumbnail,
+                    v.duration, v.views, uploaded, v.live, v.shortVideo));
+        }
+        return new Feed(out, null, null);
     }
 
     @Override
