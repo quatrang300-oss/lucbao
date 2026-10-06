@@ -19,6 +19,8 @@ data class Settings(
     val onboarded: Boolean = false,
     /** 0 = Roboto (bundled), 1 = phone's system font, 2 = Be Vietnam Pro, 3 = Noto Sans */
     val font: Int = 0,
+    /** 0 = off, 1 = Vietnamese subtitles, 2 = subtitles + voice-over, 3 = voice-over only */
+    val vietnamese: Int = 0,
 )
 
 object Prefs {
@@ -38,6 +40,7 @@ object Prefs {
             autoplayNext = sp.getBoolean("autoplayNext", true),
             onboarded = sp.getBoolean("onboarded", false),
             font = sp.getInt("font", 0),
+            vietnamese = sp.getInt("vietnamese", 0),
         )
     }
 
@@ -53,6 +56,7 @@ object Prefs {
             .putBoolean("autoplayNext", s.autoplayNext)
             .putBoolean("onboarded", s.onboarded)
             .putInt("font", s.font)
+            .putInt("vietnamese", s.vietnamese)
             .apply()
     }
 }
