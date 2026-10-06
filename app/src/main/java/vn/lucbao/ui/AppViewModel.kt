@@ -26,7 +26,7 @@ import vn.lucbao.data.videoKey
 import vn.lucbao.engine.EngineManager
 import vn.lucbao.update.Updater
 
-enum class Tab { HOME, SEARCH, MUSIC, LIBRARY, SETTINGS }
+enum class Tab { HOME, SHORTS, SEARCH, MUSIC, LIBRARY, SETTINGS }
 
 data class NavState(
     val tab: Tab = Tab.HOME,

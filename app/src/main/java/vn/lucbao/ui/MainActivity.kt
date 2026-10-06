@@ -72,6 +72,7 @@ import vn.lucbao.ui.screens.OnboardingScreen
 import vn.lucbao.ui.screens.PlayerScreen
 import vn.lucbao.ui.screens.SearchScreen
 import vn.lucbao.ui.screens.SettingsScreen
+import vn.lucbao.ui.screens.ShortsScreen
 import vn.lucbao.ui.screens.VideoSurface
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucTheme
@@ -363,16 +364,18 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
             Box(Modifier.weight(1f)) {
                 when (nav.tab) {
                     Tab.HOME -> HomeScreen(vm, onPlay = play)
+                    Tab.SHORTS -> ShortsScreen(active = !expanded, onOpenVideo = play)
                     Tab.SEARCH -> SearchScreen(vm, nav.focusSearch, onPlay = play, onBack = { vm.go(Tab.HOME) })
                     Tab.MUSIC -> MusicScreen(
                         active = !expanded,
                         onOpenPlayer = { vm.nav.update { it.copy(playerExpanded = true) } },
                     )
                     Tab.LIBRARY -> LibraryScreen(onPlay = play)
-                    Tab.SETTINGS -> SettingsScreen()
+                    Tab.SETTINGS -> SettingsScreen(onBack = { vm.go(Tab.HOME) })
                 }
             }
-            if (ui.video != null && !expanded) {
+            // The Shorts tab is full screen video: no mini player there.
+            if (ui.video != null && !expanded && nav.tab != Tab.SHORTS) {
                 MiniPlayer(ui, onExpand = { vm.nav.update { it.copy(playerExpanded = true) } })
             }
             BottomNav(nav.tab, onSelect = { vm.go(it) })
