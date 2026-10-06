@@ -92,16 +92,9 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
                 ) {
                     BrandMark(24.dp)
                     Spacer(Modifier.weight(1f))
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(50))
-                            .border(1.dp, c.primary.copy(alpha = 0.45f), RoundedCornerShape(50))
-                            .padding(horizontal = 9.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(LucIcons.Shield, null, tint = c.primary, modifier = Modifier.size(12.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("0 QC", color = c.primary, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                    // Settings moved here from the bottom bar (which now has Shorts).
+                    vn.lucbao.ui.components.IconTap(LucIcons.Settings, "Cài đặt", size = 24, tint = c.text) {
+                        vm.go(vn.lucbao.ui.Tab.SETTINGS)
                     }
                 }
             }

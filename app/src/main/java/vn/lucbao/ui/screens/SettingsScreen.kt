@@ -82,7 +82,7 @@ fun openInstallPermission(context: Context) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onBack: () -> Unit = {}) {
     val c = Luc.colors
     val context = LocalContext.current
     val s by Prefs.state.collectAsStateWithLifecycle()
@@ -102,10 +102,13 @@ fun SettingsScreen() {
             .statusBarsPadding()
             .padding(bottom = 24.dp)
     ) {
-        Text(
-            "Cài đặt", fontWeight = FontWeight.SemiBold, fontSize = 24.sp,
-            color = c.text, modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 8.dp)
-        )
+        Row(
+            Modifier.padding(start = 6.dp, top = 8.dp, bottom = 4.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            vn.lucbao.ui.components.IconTap(LucIcons.Back, "Quay lại", onClick = onBack)
+            Text("Cài đặt", fontWeight = FontWeight.SemiBold, fontSize = 24.sp, color = c.text)
+        }
 
         if (!installOk || !notifOk) {
             Card("Cần bật một lần") {
