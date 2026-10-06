@@ -8,6 +8,9 @@ import org.schabi.newpipe.extractor.Page;
 import org.schabi.newpipe.extractor.ServiceList;
 import org.schabi.newpipe.extractor.StreamingService;
 import org.schabi.newpipe.extractor.channel.ChannelInfo;
+import org.schabi.newpipe.extractor.channel.ChannelInfoItem;
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo;
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs;
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException;
@@ -345,6 +348,112 @@ public final class EngineImpl implements Engine {
                 info.getTextualUploadDate(), plainDescription(info.getDescription()),
                 info.getDuration(), pickImage(info.getThumbnails(), 720), live,
                 videos, audios, related);
+    }
+
+    // ------------------------------------------------------------------ music
+    // Not part of the Engine interface: found by reflection, plain types only (see captionsJson).
+
+    /**
+     * YouTube Music search.
+     *
+     * @param filter music_songs, music_videos, music_albums or music_playlists
+     * @return {"items":[{type,url,title,artist,artistUrl,thumb,duration,count}],"next":token}
+     */
+    public String musicSearchJson(final String query, final String filter,
+                                  final String pageToken) throws Exception {
+        final String f = filter == null || filter.isEmpty() ? "music_songs" : filter;
+        final SearchQueryHandler qh = yt.getSearchQHFactory().fromQuery(query,
+                Collections.singletonList(f), "");
+        final ListExtractor.InfoItemsPage<InfoItem> page;
+        if (pageToken == null) {
+            final SearchExtractor ex = yt.getSearchExtractor(qh);
+            ex.fetchPage();
+            page = ex.getInitialPage();
+        } else {
+            final Page p = pages.get(pageToken);
+            if (p == null) {
+                return musicJson(Collections.<InfoItem>emptyList(), null, f).toString();
+            }
+            page = SearchInfo.getMoreItems(yt, qh, p);
+        }
+        return musicJson(page.getItems(), page.getNextPage(), f).toString();
+    }
+
+    /**
+     * Songs of an album, playlist or mix ("radio": watch?v=ID&list=RDID).
+     *
+     * @return {"title","uploader","thumb","count","items":[…],"next":token}
+     */
+    public String playlistJson(final String url, final String pageToken) throws Exception {
+        if (pageToken == null) {
+            final PlaylistInfo info = PlaylistInfo.getInfo(yt, url);
+            final JSONObject o = musicJson(info.getRelatedItems(), info.getNextPage(), null);
+            String thumb = pickImage(info.getThumbnails(), 480);
+            o.put("title", info.getName() == null ? "" : info.getName());
+            o.put("uploader", info.getUploaderName() == null ? "" : info.getUploaderName());
+            o.put("thumb", thumb == null ? "" : thumb);
+            long count = -1;
+            try {
+                count = info.getStreamCount();
+            } catch (final Throwable ignored) {
+                // mixes have no count
+            }
+            o.put("count", count);
+            return o.toString();
+        }
+        final Page p = pages.get(pageToken);
+        if (p == null) {
+            return musicJson(Collections.<InfoItem>emptyList(), null, null).toString();
+        }
+        final ListExtractor.InfoItemsPage<StreamInfoItem> page =
+                PlaylistInfo.getMoreItems(yt, url, p);
+        return musicJson(page.getItems(), page.getNextPage(), null).toString();
+    }
+
+    private JSONObject musicJson(final List<? extends InfoItem> items, final Page next,
+                                 final String filter) throws Exception {
+        final JSONArray arr = new JSONArray();
+        for (final InfoItem item : items) {
+            final JSONObject o = new JSONObject();
+            final String thumb = pickImage(item.getThumbnails(), 360);
+            o.put("url", item.getUrl());
+            o.put("title", item.getName() == null ? "" : item.getName());
+            o.put("thumb", thumb == null ? "" : thumb);
+            if (item instanceof StreamInfoItem) {
+                final StreamInfoItem st = (StreamInfoItem) item;
+                o.put("type", "music_videos".equals(filter) ? "video" : "song");
+                o.put("artist", st.getUploaderName() == null ? "" : st.getUploaderName());
+                o.put("artistUrl", st.getUploaderUrl() == null ? "" : st.getUploaderUrl());
+                o.put("duration", st.getDuration());
+                o.put("count", st.getViewCount());
+            } else if (item instanceof PlaylistInfoItem) {
+                final PlaylistInfoItem pl = (PlaylistInfoItem) item;
+                o.put("type", "music_albums".equals(filter) ? "album" : "playlist");
+                o.put("artist", pl.getUploaderName() == null ? "" : pl.getUploaderName());
+                o.put("artistUrl", pl.getUploaderUrl() == null ? "" : pl.getUploaderUrl());
+                o.put("duration", -1);
+                o.put("count", pl.getStreamCount());
+            } else if (item instanceof ChannelInfoItem) {
+                final ChannelInfoItem ch = (ChannelInfoItem) item;
+                o.put("type", "artist");
+                o.put("artist", "");
+                o.put("artistUrl", item.getUrl());
+                o.put("duration", -1);
+                o.put("count", ch.getSubscriberCount());
+            } else {
+                continue;
+            }
+            arr.put(o);
+        }
+        String token = null;
+        if (Page.isValid(next)) {
+            token = UUID.randomUUID().toString();
+            pages.put(token, next);
+        }
+        final JSONObject out = new JSONObject();
+        out.put("items", arr);
+        out.put("next", token == null ? JSONObject.NULL : token);
+        return out;
     }
 
     // ------------------------------------------------------------------ subtitles
