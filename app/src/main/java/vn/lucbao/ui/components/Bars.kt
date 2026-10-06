@@ -118,10 +118,10 @@ fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
     val c = Luc.colors
     val items = listOf(
         Triple(Tab.HOME, LucIcons.Home, "Trang chủ"),
+        Triple(Tab.SHORTS, LucIcons.Shorts, "Shorts"),
         Triple(Tab.SEARCH, LucIcons.Search, "Khám phá"),
         Triple(Tab.MUSIC, LucIcons.Music, "Nhạc"),
         Triple(Tab.LIBRARY, LucIcons.Library, "Thư viện"),
-        Triple(Tab.SETTINGS, LucIcons.Tune, "Cài đặt"),
     )
     Column(Modifier.fillMaxWidth().background(c.surface)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
