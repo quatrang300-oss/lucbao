@@ -66,6 +66,8 @@ import vn.lucbao.ui.components.BottomNav
 import vn.lucbao.ui.components.MiniPlayer
 import vn.lucbao.ui.screens.HomeScreen
 import vn.lucbao.ui.screens.LibraryScreen
+import vn.lucbao.ui.screens.MusicPlayerScreen
+import vn.lucbao.ui.screens.MusicScreen
 import vn.lucbao.ui.screens.OnboardingScreen
 import vn.lucbao.ui.screens.PlayerScreen
 import vn.lucbao.ui.screens.SearchScreen
@@ -123,6 +125,13 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 combine(PlayerController.ui, vm.nav, Prefs.state) { _, _, _ -> }.collect { updatePip() }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                PlayerController.messages.collect { msg ->
+                    android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         lifecycleScope.launch {
@@ -316,6 +325,7 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
     val c = Luc.colors
     val nav by vm.nav.collectAsStateWithLifecycle()
     val ui by PlayerController.ui.collectAsStateWithLifecycle()
+    val queue by PlayerController.queue.collectAsStateWithLifecycle()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     // Declared before the picture-in-picture branch so the child lock survives PiP.
     var locked by rememberSaveable { mutableStateOf(false) }
@@ -331,12 +341,22 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
     }
     val expanded = nav.playerExpanded && ui.video != null
     LaunchedEffect(ui.video == null) { if (ui.video == null) locked = false }
-    val fullscreen = expanded && (nav.fullscreen || landscape)
+    // Songs from the Music tab open the music player, which never goes full screen.
+    val musicView = queue.showMusicPlayer
+    val fullscreen = expanded && !musicView && (nav.fullscreen || landscape)
 
     LaunchedEffect(fullscreen) { actions.onFullscreenShown(fullscreen) }
     LaunchedEffect(ui.video) {
         if (ui.video == null && nav.playerExpanded) vm.nav.update { it.copy(playerExpanded = false, fullscreen = false) }
     }
+
+    // Screens composed later (player panels, album pages in the Music tab…) register their
+    // own back handling afterwards, so it takes priority over these general rules.
+    BackHandler(enabled = expanded) {
+        if (nav.fullscreen) vm.nav.update { it.copy(fullscreen = false) }
+        else vm.nav.update { it.copy(playerExpanded = false) }
+    }
+    BackHandler(enabled = !expanded && nav.tab != Tab.HOME) { vm.go(Tab.HOME) }
 
     Box(Modifier.fillMaxSize().background(c.surface)) {
         Column(Modifier.fillMaxSize()) {
@@ -344,6 +364,10 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
                 when (nav.tab) {
                     Tab.HOME -> HomeScreen(vm, onPlay = play)
                     Tab.SEARCH -> SearchScreen(vm, nav.focusSearch, onPlay = play, onBack = { vm.go(Tab.HOME) })
+                    Tab.MUSIC -> MusicScreen(
+                        active = !expanded,
+                        onOpenPlayer = { vm.nav.update { it.copy(playerExpanded = true) } },
+                    )
                     Tab.LIBRARY -> LibraryScreen(onPlay = play)
                     Tab.SETTINGS -> SettingsScreen()
                 }
@@ -358,24 +382,24 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
             enter = slideInVertically { it },
             exit = slideOutVertically { it },
         ) {
-            PlayerScreen(
-                ui = ui,
-                fullscreen = fullscreen,
-                locked = locked,
-                onLockChange = { locked = it },
-                onCollapse = { vm.nav.update { it.copy(playerExpanded = false) } },
-                onToggleFullscreen = actions.onToggleFullscreen,
-                onPip = actions.onPip,
-                onPlay = play,
-            )
+            if (musicView) {
+                MusicPlayerScreen(ui, onCollapse = { vm.nav.update { it.copy(playerExpanded = false) } })
+            } else {
+                PlayerScreen(
+                    ui = ui,
+                    fullscreen = fullscreen,
+                    locked = locked,
+                    onLockChange = { locked = it },
+                    onCollapse = { vm.nav.update { it.copy(playerExpanded = false) } },
+                    onToggleFullscreen = actions.onToggleFullscreen,
+                    onPip = actions.onPip,
+                    onPlay = play,
+                )
+            }
         }
     }
 
-    BackHandler(enabled = expanded) {
-        if (nav.fullscreen) vm.nav.update { it.copy(fullscreen = false) }
-        else vm.nav.update { it.copy(playerExpanded = false) }
-    }
-    BackHandler(enabled = !expanded && nav.tab != Tab.HOME) { vm.go(Tab.HOME) }
-    // Child lock: the back gesture does nothing until the screen is unlocked.
+    // Child lock: the back gesture does nothing until the screen is unlocked. Every other
+    // handler is disabled while locked, so this one is the only one left.
     BackHandler(enabled = expanded && locked) { }
 }
