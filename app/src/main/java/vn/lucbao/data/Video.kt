@@ -50,9 +50,13 @@ fun VideoDetails.toVideo() = Video(
 )
 
 /** Stable key used to match the same video across different URL shapes. */
+private val KEY_WATCH = Regex("[?&]v=([A-Za-z0-9_-]{11})")
+private val KEY_SHORT = Regex("youtu\\.be/([A-Za-z0-9_-]{11})")
+private val KEY_PATH = Regex("/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})")
+
 fun videoKey(url: String): String {
-    val v = Regex("[?&]v=([A-Za-z0-9_-]{11})").find(url)?.groupValues?.get(1)
-        ?: Regex("youtu\\.be/([A-Za-z0-9_-]{11})").find(url)?.groupValues?.get(1)
-        ?: Regex("/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})").find(url)?.groupValues?.get(1)
+    val v = KEY_WATCH.find(url)?.groupValues?.get(1)
+        ?: KEY_SHORT.find(url)?.groupValues?.get(1)
+        ?: KEY_PATH.find(url)?.groupValues?.get(1)
     return v ?: url
 }

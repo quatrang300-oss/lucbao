@@ -45,6 +45,17 @@ data class FavoriteEntry(
     val addedAt: Long,
 )
 
+/** An album or playlist saved in the Music tab. */
+data class SavedList(
+    val url: String,
+    val title: String,
+    val artist: String,
+    val thumb: String?,
+    /** album or playlist */
+    val type: String,
+    val addedAt: Long,
+)
+
 /** Watch history and favourites, stored privately on the phone (no account needed). */
 object Library {
     private const val MAX_HISTORY = 500
@@ -62,6 +73,26 @@ object Library {
 
     private val _downloads = MutableStateFlow<List<DownloadEntry>>(emptyList())
     val downloads: StateFlow<List<DownloadEntry>> = _downloads.asStateFlow()
+
+    // ---- Music tab
+    private const val MAX_RECENT_SONGS = 60
+    private val _likedSongs = MutableStateFlow<List<Video>>(emptyList())
+    val likedSongs: StateFlow<List<Video>> = _likedSongs.asStateFlow()
+
+    /** [videoKey]s of the liked songs, for quick "is it liked?" checks in lists. */
+    private val _likedKeys = MutableStateFlow<Set<String>>(emptySet())
+    val likedKeys: StateFlow<Set<String>> = _likedKeys.asStateFlow()
+
+    private fun setLiked(list: List<Video>) {
+        _likedSongs.value = list
+        _likedKeys.value = list.map { videoKey(it.url) }.toHashSet()
+    }
+
+    private val _recentSongs = MutableStateFlow<List<Video>>(emptyList())
+    val recentSongs: StateFlow<List<Video>> = _recentSongs.asStateFlow()
+
+    private val _savedLists = MutableStateFlow<List<SavedList>>(emptyList())
+    val savedLists: StateFlow<List<SavedList>> = _savedLists.asStateFlow()
 
     fun init(context: Context) {
         file = File(context.filesDir, "library.json")
@@ -85,6 +116,15 @@ object Library {
                         bytes = o.optLong("bytes"),
                         sourceUrl = o.optString("src"),
                         at = o.optLong("t"),
+                    )
+                }
+                setLiked(root.optJSONArray("songs").toList { it.toVideo() })
+                _recentSongs.value = root.optJSONArray("recentSongs").toList { it.toVideo() }
+                _savedLists.value = root.optJSONArray("lists").toList { o ->
+                    SavedList(
+                        o.getString("url"), o.optString("title"), o.optString("artist"),
+                        o.optString("thumb").ifEmpty { null }, o.optString("type", "playlist"),
+                        o.optLong("t"),
                     )
                 }
                 _channels.value = root.optJSONArray("channels").toList { o ->
@@ -167,6 +207,43 @@ object Library {
         save()
     }
 
+    // ---- Music tab
+
+    fun isLikedSong(url: String): Boolean = videoKey(url) in _likedKeys.value
+
+    fun toggleLikedSong(video: Video) {
+        val key = videoKey(video.url)
+        setLiked(
+            if (isLikedSong(video.url)) _likedSongs.value.filterNot { videoKey(it.url) == key }
+            else listOf(video) + _likedSongs.value
+        )
+        save()
+    }
+
+    fun recordSong(video: Video) {
+        if (video.title.isBlank()) return
+        val key = videoKey(video.url)
+        _recentSongs.value = (listOf(video) + _recentSongs.value.filterNot { videoKey(it.url) == key })
+            .take(MAX_RECENT_SONGS)
+        save()
+    }
+
+    fun clearRecentSongs() {
+        _recentSongs.value = emptyList()
+        save()
+    }
+
+    fun isSavedList(url: String) = _savedLists.value.any { it.url == url }
+
+    fun toggleSavedList(list: SavedList) {
+        _savedLists.value = if (isSavedList(list.url)) {
+            _savedLists.value.filterNot { it.url == list.url }
+        } else {
+            listOf(list) + _savedLists.value
+        }
+        save()
+    }
+
     @Synchronized
     fun addDownload(entry: DownloadEntry) {
         _downloads.value = listOf(entry) + _downloads.value.filterNot { it.uri == entry.uri }
@@ -184,6 +261,9 @@ object Library {
         val dl = _downloads.value
         val f = _favorites.value
         val ch = _channels.value
+        val songs = _likedSongs.value
+        val recentSongs = _recentSongs.value
+        val lists = _savedLists.value
         io.execute {
             runCatching {
                 val root = JSONObject()
@@ -210,6 +290,15 @@ object Library {
                     ch.forEach {
                         put(JSONObject().put("url", it.url).put("name", it.name)
                             .put("avatar", it.avatar ?: "").put("t", it.addedAt))
+                    }
+                })
+                root.put("songs", JSONArray().apply { songs.forEach { put(it.toJson()) } })
+                root.put("recentSongs", JSONArray().apply { recentSongs.forEach { put(it.toJson()) } })
+                root.put("lists", JSONArray().apply {
+                    lists.forEach {
+                        put(JSONObject().put("url", it.url).put("title", it.title)
+                            .put("artist", it.artist).put("thumb", it.thumb ?: "")
+                            .put("type", it.type).put("t", it.addedAt))
                     }
                 })
                 val tmp = File(file.parentFile, "library.json.tmp")
