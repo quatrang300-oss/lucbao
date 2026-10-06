@@ -759,10 +759,29 @@ private fun Details(
             }
         }
         item(key = "nextTitle") {
-            SectionTitle(
-                "Tiếp theo",
-                if (settings.autoplayNext) "Tự phát: Bật" else "Tự phát: Tắt"
-            ) { Prefs.update { it.copy(autoplayNext = !it.autoplayNext) } }
+            val loop by PlayerController.loopVideo.collectAsStateWithLifecycle()
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Tiếp theo", fontWeight = FontWeight.SemiBold, fontSize = 17.sp,
+                    color = c.text, modifier = Modifier.weight(1f)
+                )
+                // Lặp lại: replay this video when it ends (wins over autoplay).
+                SmallToggle(LucIcons.RepeatOne, "Lặp lại", loop) { PlayerController.setLoopVideo(!loop) }
+                Spacer(Modifier.width(6.dp))
+                SmallToggle(
+                    LucIcons.Play, if (settings.autoplayNext) "Tự phát: Bật" else "Tự phát: Tắt",
+                    settings.autoplayNext && !loop
+                ) { Prefs.update { it.copy(autoplayNext = !it.autoplayNext) } }
+            }
+            if (loop) {
+                Text(
+                    "Video này sẽ tự phát lại khi hết.", color = c.muted, fontSize = 11.5.sp,
+                    modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                )
+            }
         }
         if (d == null && ui.loading) {
             item(key = "loading") { vn.lucbao.ui.components.LoadingBox() }
@@ -782,6 +801,24 @@ private fun Details(
             url = channelUrl, name = v.channel, avatar = d?.channelAvatar,
             onDismiss = { channelSheet = false }, onPlay = onPlay
         )
+    }
+}
+
+@Composable
+private fun SmallToggle(icon: ImageVector, text: String, on: Boolean, onClick: () -> Unit) {
+    val c = Luc.colors
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (on) c.primary.copy(alpha = 0.18f) else Color.Transparent)
+            .border(1.dp, if (on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = if (on) c.primary else c.muted, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(text, color = if (on) c.primary else c.muted, fontSize = 11.5.sp)
     }
 }
 
