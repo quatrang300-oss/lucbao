@@ -180,6 +180,30 @@ public final class EngineImpl implements Engine {
         if (kioskId.startsWith(FEED_PREFIX)) {
             return channelFeed(kioskId.substring(FEED_PREFIX.length()));
         }
+        if (TRENDING_MUSIC.equals(kioskId)) {
+            // YouTube Charts only covers some countries (not Vietnam): fall back to a search.
+            if (!musicChartUnsupported) {
+                try {
+                    return kioskFeed(kioskId, pageToken);
+                } catch (final UnsupportedContentInCountryException e) {
+                    musicChartUnsupported = true;
+                    return search(musicChartFallbackQuery(), null);
+                }
+            }
+            return search(musicChartFallbackQuery(), pageToken);
+        }
+        return kioskFeed(kioskId, pageToken);
+    }
+
+    private static final String TRENDING_MUSIC = "trending_music";
+    private volatile boolean musicChartUnsupported = false;
+
+    private String musicChartFallbackQuery() {
+        return "vi".equalsIgnoreCase(localization.getLanguageCode())
+                ? "nhạc hot nhất hiện nay" : "top music videos this week";
+    }
+
+    private Feed kioskFeed(final String kioskId, final String pageToken) throws Exception {
         final KioskList list = yt.getKioskList();
         final ListExtractor.InfoItemsPage<StreamInfoItem> page;
         if (pageToken == null) {
