@@ -11,6 +11,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import kotlinx.coroutines.launch
 import vn.lucbao.ui.components.Thumb
@@ -39,6 +40,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -98,6 +101,7 @@ import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
 
 private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
+private const val PANEL_HIDE_MS = 10_000L
 
 private fun speedLabel(s: Float): String =
     (if (s == s.toInt().toFloat()) "${s.toInt()}.0" else s.toString()).replace('.', ',') + "×"
@@ -116,8 +120,20 @@ fun PlayerScreen(
     val c = Luc.colors
     var showQuality by remember { mutableStateOf(false) }
     var morePanel by remember { mutableStateOf(false) }
+    // Kept outside the panel so reopening "Nhiều video hơn" shows the list where it was left.
+    val panelList = rememberLazyListState()
+    var panelTouch by remember { mutableLongStateOf(0L) }
     LaunchedEffect(fullscreen) { if (!fullscreen) morePanel = false }
     BackHandler(enabled = morePanel && !locked) { morePanel = false }
+    // A different video has a different list: start that one from the top.
+    LaunchedEffect(ui.video?.url) { panelList.scrollToItem(0) }
+    // Hide the panel 10 s after the last touch / scroll; the video goes back to full screen.
+    LaunchedEffect(morePanel, panelTouch, panelList.isScrollInProgress) {
+        if (morePanel && !panelList.isScrollInProgress) {
+            delay(PANEL_HIDE_MS)
+            morePanel = false
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -140,14 +156,23 @@ fun PlayerScreen(
                     onToggleFullscreen = onToggleFullscreen,
                     onQuality = { showQuality = true },
                     onLock = { onLockChange(true) },
-                    onMore = { morePanel = true },
+                    onMore = {
+                        panelTouch = System.currentTimeMillis()
+                        morePanel = true
+                    },
                 )
                 if (fullscreen && morePanel) {
                     RelatedPanel(
                         ui = ui,
+                        state = panelList,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
+                        onTouch = { panelTouch = System.currentTimeMillis() },
                         onClose = { morePanel = false },
-                        onPlay = onPlay,
+                        onPlay = { v ->
+                            // Picked: hide the list at once and play full screen.
+                            morePanel = false
+                            onPlay(v)
+                        },
                     )
                 }
             }
@@ -251,8 +276,27 @@ private fun LockOverlay(fullscreen: Boolean, onUnlock: () -> Unit) {
 
 /** Right-hand list shown next to the video in fullscreen ("Nhiều video hơn"). */
 @Composable
-private fun RelatedPanel(ui: PlayerUi, modifier: Modifier, onClose: () -> Unit, onPlay: (Video) -> Unit) {
-    Column(modifier.background(Color(0xF2071A13))) {
+private fun RelatedPanel(
+    ui: PlayerUi,
+    state: LazyListState,
+    modifier: Modifier,
+    onTouch: () -> Unit,
+    onClose: () -> Unit,
+    onPlay: (Video) -> Unit,
+) {
+    Column(
+        modifier
+            .background(Color(0xF2071A13))
+            // Any touch on the panel restarts the 10-second auto-hide (nothing is consumed).
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(PointerEventPass.Initial)
+                        onTouch()
+                    }
+                }
+            }
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -263,7 +307,7 @@ private fun RelatedPanel(ui: PlayerUi, modifier: Modifier, onClose: () -> Unit, 
             )
             IconTap(LucIcons.Close, "Đóng", size = 22, tint = Color.White, onClick = onClose)
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = state) {
             itemsIndexed(ui.related, key = { i, r -> "p$i-${r.url}" }) { _, r ->
                 Row(
                     Modifier
