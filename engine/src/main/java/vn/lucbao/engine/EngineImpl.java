@@ -8,9 +8,6 @@ import org.schabi.newpipe.extractor.Page;
 import org.schabi.newpipe.extractor.ServiceList;
 import org.schabi.newpipe.extractor.StreamingService;
 import org.schabi.newpipe.extractor.channel.ChannelInfo;
-import org.schabi.newpipe.extractor.channel.ChannelInfoItem;
-import org.schabi.newpipe.extractor.playlist.PlaylistInfo;
-import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs;
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException;
@@ -41,7 +38,6 @@ import org.schabi.newpipe.extractor.stream.Stream;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
-import org.schabi.newpipe.extractor.stream.SubtitlesStream;
 import org.schabi.newpipe.extractor.stream.VideoStream;
 
 import java.io.IOException;
@@ -56,11 +52,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 import vn.lucbao.api.AudioOption;
 import vn.lucbao.api.Engine;
@@ -180,27 +171,50 @@ public final class EngineImpl implements Engine {
         if (kioskId.startsWith(FEED_PREFIX)) {
             return channelFeed(kioskId.substring(FEED_PREFIX.length()));
         }
-        if (TRENDING_MUSIC.equals(kioskId)) {
-            // YouTube Charts only covers some countries (not Vietnam): fall back to a search.
-            if (!musicChartUnsupported) {
-                try {
-                    return kioskFeed(kioskId, pageToken);
-                } catch (final UnsupportedContentInCountryException e) {
-                    musicChartUnsupported = true;
-                    return search(musicChartFallbackQuery(), null);
-                }
-            }
-            return search(musicChartFallbackQuery(), pageToken);
+        // Some lists come from YouTube Charts, which only covers some countries (not Vietnam)
+        // and then fails or answers like a bot block. Fall back to a search on the same theme.
+        final String fallback = kioskFallbackQuery(kioskId);
+        if (fallback == null) {
+            return kioskFeed(kioskId, pageToken);
         }
-        return kioskFeed(kioskId, pageToken);
+        if (!brokenKiosks.contains(kioskId)) {
+            try {
+                final Feed feed = kioskFeed(kioskId, pageToken);
+                if (pageToken != null || !feed.items.isEmpty()) {
+                    return feed;
+                }
+                // An empty list (e.g. no podcasts chart in this country): use the search too.
+                brokenKiosks.add(kioskId);
+                return search(fallback, null);
+            } catch (final Exception e) {
+                if (classifyError(e) == ErrorKind.NETWORK || pageToken != null) {
+                    throw e;
+                }
+                brokenKiosks.add(kioskId);
+                return search(fallback, null);
+            }
+        }
+        return search(fallback, pageToken);
     }
 
-    private static final String TRENDING_MUSIC = "trending_music";
-    private volatile boolean musicChartUnsupported = false;
+    /** Kiosks that failed in this country; they are served by a search from now on. */
+    private final java.util.Set<String> brokenKiosks =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
-    private String musicChartFallbackQuery() {
-        return "vi".equalsIgnoreCase(localization.getLanguageCode())
-                ? "nhạc hot nhất hiện nay" : "top music videos this week";
+    private String kioskFallbackQuery(final String kioskId) {
+        final boolean vi = "vi".equalsIgnoreCase(localization.getLanguageCode());
+        switch (kioskId) {
+            case "trending_music":
+                return vi ? "nhạc hot nhất hiện nay" : "top music videos this week";
+            case "trending_movies_and_shows":
+                return vi ? "trailer phim mới nhất" : "new movie trailers";
+            case "trending_gaming":
+                return vi ? "game hot hôm nay" : "gaming highlights today";
+            case "trending_podcasts_episodes":
+                return vi ? "podcast tiếng Việt" : "podcast episodes";
+            default:
+                return null;
+        }
     }
 
     private Feed kioskFeed(final String kioskId, final String pageToken) throws Exception {
@@ -372,290 +386,6 @@ public final class EngineImpl implements Engine {
                 info.getTextualUploadDate(), plainDescription(info.getDescription()),
                 info.getDuration(), pickImage(info.getThumbnails(), 720), live,
                 videos, audios, related);
-    }
-
-    // ------------------------------------------------------------------ music
-    // Not part of the Engine interface: found by reflection, plain types only (see captionsJson).
-
-    /**
-     * YouTube Music search.
-     *
-     * @param filter music_songs, music_videos, music_albums or music_playlists
-     * @return {"items":[{type,url,title,artist,artistUrl,thumb,duration,count}],"next":token}
-     */
-    public String musicSearchJson(final String query, final String filter,
-                                  final String pageToken) throws Exception {
-        final String f = filter == null || filter.isEmpty() ? "music_songs" : filter;
-        final SearchQueryHandler qh = yt.getSearchQHFactory().fromQuery(query,
-                Collections.singletonList(f), "");
-        final ListExtractor.InfoItemsPage<InfoItem> page;
-        if (pageToken == null) {
-            final SearchExtractor ex = yt.getSearchExtractor(qh);
-            ex.fetchPage();
-            page = ex.getInitialPage();
-        } else {
-            final Page p = pages.get(pageToken);
-            if (p == null) {
-                return musicJson(Collections.<InfoItem>emptyList(), null, f).toString();
-            }
-            page = SearchInfo.getMoreItems(yt, qh, p);
-        }
-        return musicJson(page.getItems(), page.getNextPage(), f).toString();
-    }
-
-    /**
-     * Songs of an album, playlist or mix ("radio": watch?v=ID&list=RDID).
-     *
-     * @return {"title","uploader","thumb","count","items":[…],"next":token}
-     */
-    public String playlistJson(final String url, final String pageToken) throws Exception {
-        if (pageToken == null) {
-            final PlaylistInfo info = PlaylistInfo.getInfo(yt, url);
-            final JSONObject o = musicJson(info.getRelatedItems(), info.getNextPage(), null);
-            String thumb = pickImage(info.getThumbnails(), 480);
-            o.put("title", info.getName() == null ? "" : info.getName());
-            o.put("uploader", info.getUploaderName() == null ? "" : info.getUploaderName());
-            o.put("thumb", thumb == null ? "" : thumb);
-            long count = -1;
-            try {
-                count = info.getStreamCount();
-            } catch (final Throwable ignored) {
-                // mixes have no count
-            }
-            o.put("count", count);
-            return o.toString();
-        }
-        final Page p = pages.get(pageToken);
-        if (p == null) {
-            return musicJson(Collections.<InfoItem>emptyList(), null, null).toString();
-        }
-        final ListExtractor.InfoItemsPage<StreamInfoItem> page =
-                PlaylistInfo.getMoreItems(yt, url, p);
-        return musicJson(page.getItems(), page.getNextPage(), null).toString();
-    }
-
-    private JSONObject musicJson(final List<? extends InfoItem> items, final Page next,
-                                 final String filter) throws Exception {
-        final JSONArray arr = new JSONArray();
-        for (final InfoItem item : items) {
-            final JSONObject o = new JSONObject();
-            final String thumb = pickImage(item.getThumbnails(), 360);
-            o.put("url", item.getUrl());
-            o.put("title", item.getName() == null ? "" : item.getName());
-            o.put("thumb", thumb == null ? "" : thumb);
-            if (item instanceof StreamInfoItem) {
-                final StreamInfoItem st = (StreamInfoItem) item;
-                o.put("type", "music_videos".equals(filter) ? "video" : "song");
-                o.put("artist", st.getUploaderName() == null ? "" : st.getUploaderName());
-                o.put("artistUrl", st.getUploaderUrl() == null ? "" : st.getUploaderUrl());
-                o.put("duration", st.getDuration());
-                o.put("count", st.getViewCount());
-            } else if (item instanceof PlaylistInfoItem) {
-                final PlaylistInfoItem pl = (PlaylistInfoItem) item;
-                o.put("type", "music_albums".equals(filter) ? "album" : "playlist");
-                o.put("artist", pl.getUploaderName() == null ? "" : pl.getUploaderName());
-                o.put("artistUrl", pl.getUploaderUrl() == null ? "" : pl.getUploaderUrl());
-                o.put("duration", -1);
-                o.put("count", pl.getStreamCount());
-            } else if (item instanceof ChannelInfoItem) {
-                final ChannelInfoItem ch = (ChannelInfoItem) item;
-                o.put("type", "artist");
-                o.put("artist", "");
-                o.put("artistUrl", item.getUrl());
-                o.put("duration", -1);
-                o.put("count", ch.getSubscriberCount());
-            } else {
-                continue;
-            }
-            arr.put(o);
-        }
-        String token = null;
-        if (Page.isValid(next)) {
-            token = UUID.randomUUID().toString();
-            pages.put(token, next);
-        }
-        final JSONObject out = new JSONObject();
-        out.put("items", arr);
-        out.put("next", token == null ? JSONObject.NULL : token);
-        return out;
-    }
-
-    // ------------------------------------------------------------------ subtitles
-
-    private static final Pattern SRV1_TEXT = Pattern.compile(
-            "<text\\s+start=\"([0-9.]+)\"(?:\\s+dur=\"([0-9.]+)\")?[^>]*>(.*?)</text>",
-            Pattern.DOTALL);
-    private static final Pattern NUMERIC_ENTITY = Pattern.compile("&#(x?)([0-9a-fA-F]+);");
-
-    /** One parsed subtitle line. */
-    static final class Line {
-        final long start;
-        final long end;
-        final String text;
-
-        Line(final long start, final long end, final String text) {
-            this.start = start;
-            this.end = end;
-            this.text = text;
-        }
-    }
-
-    /**
-     * Subtitles of a video in {@code language}, as JSON. Not part of the {@link Engine}
-     * interface on purpose: the app finds it by reflection and only plain types cross the
-     * boundary, so engines with this method still load in older apps (API 1 unchanged).
-     *
-     * <pre>{"language":"vi","source":"en","translated":true,"auto":true,
-     *  "lines":[[startMs,endMs,"text"],…]}</pre>
-     *
-     * @return null when the video has no subtitles at all
-     */
-    public String captionsJson(final String url, final String language) throws Exception {
-        StreamInfo info = infos.get(url);
-        if (info == null) {
-            details(url);
-            info = infos.get(url);
-        }
-        if (info == null) {
-            return null;
-        }
-        final List<SubtitlesStream> subs = info.getSubtitles();
-        if (subs == null || subs.isEmpty()) {
-            return null;
-        }
-        final String want = language == null || language.isEmpty()
-                ? "vi" : language.toLowerCase(Locale.ROOT);
-
-        SubtitlesStream direct = null;
-        SubtitlesStream directAuto = null;
-        SubtitlesStream source = null;
-        SubtitlesStream sourceAuto = null;
-        for (final SubtitlesStream sub : subs) {
-            final String content = sub.getContent();
-            if (content == null || !content.startsWith("http")) {
-                continue;
-            }
-            final String tag = sub.getLanguageTag() == null
-                    ? "" : sub.getLanguageTag().toLowerCase(Locale.ROOT);
-            final boolean wanted = tag.equals(want) || tag.startsWith(want + "-");
-            if (wanted) {
-                if (sub.isAutoGenerated()) {
-                    if (directAuto == null) {
-                        directAuto = sub;
-                    }
-                } else if (direct == null) {
-                    direct = sub;
-                }
-            } else if (sub.isAutoGenerated()) {
-                if (sourceAuto == null) {
-                    sourceAuto = sub;
-                }
-            } else if (source == null) {
-                source = sub;
-            }
-        }
-
-        // Real subtitles in the wanted language first, then YouTube's translation.
-        final SubtitlesStream chosen;
-        final boolean translate;
-        if (direct != null) {
-            chosen = direct;
-            translate = false;
-        } else if (directAuto != null) {
-            chosen = directAuto;
-            translate = false;
-        } else if (source != null) {
-            chosen = source;
-            translate = true;
-        } else {
-            chosen = sourceAuto;
-            translate = true;
-        }
-        if (chosen == null) {
-            return null;
-        }
-
-        final String base = chosen.getContent()
-                .replaceAll("&fmt=[^&]*", "")
-                .replaceAll("&tlang=[^&]*", "");
-        final String fetch = base + "&fmt=srv1" + (translate ? "&tlang=" + want : "");
-        final String body = NewPipe.getDownloader().get(fetch, localization).responseBody();
-        final List<Line> lines = parseSrv1(body);
-        final JSONArray arr = new JSONArray();
-        for (final Line l : lines) {
-            arr.put(new JSONArray().put(l.start).put(l.end).put(l.text));
-        }
-        return new JSONObject()
-                .put("language", want)
-                .put("source", chosen.getLanguageTag() == null ? "" : chosen.getLanguageTag())
-                .put("translated", translate)
-                .put("auto", chosen.isAutoGenerated())
-                .put("lines", arr)
-                .toString();
-    }
-
-    /** Parses YouTube's "srv1" timed text: {@code <text start="1.2" dur="3.4">…</text>}. */
-    static List<Line> parseSrv1(final String xml) {
-        final List<Line> out = new ArrayList<>();
-        if (xml == null || xml.isEmpty()) {
-            return out;
-        }
-        final Matcher m = SRV1_TEXT.matcher(xml);
-        while (m.find()) {
-            final long start;
-            final long dur;
-            try {
-                start = Math.round(Double.parseDouble(m.group(1)) * 1000);
-                dur = m.group(2) == null ? 2000 : Math.round(Double.parseDouble(m.group(2)) * 1000);
-            } catch (final NumberFormatException e) {
-                continue;
-            }
-            // Text is HTML-escaped, sometimes twice (&amp;#39;).
-            String text = unescape(unescape(m.group(3)))
-                    .replaceAll("<[^>]*>", "")
-                    .replaceAll("\\s+", " ")
-                    .trim();
-            if (text.isEmpty()) {
-                continue;
-            }
-            out.add(new Line(start, start + Math.max(dur, 300), text));
-        }
-        Collections.sort(out, (a, b) -> Long.compare(a.start, b.start));
-        // No overlaps: a line ends when the next one starts.
-        for (int i = 0; i + 1 < out.size(); i++) {
-            final Line a = out.get(i);
-            final Line b = out.get(i + 1);
-            if (b.start < a.end && b.start > a.start) {
-                out.set(i, new Line(a.start, b.start, a.text));
-            }
-        }
-        return out;
-    }
-
-    private static String unescape(final String s) {
-        if (s.indexOf('&') < 0) {
-            return s;
-        }
-        final Matcher m = NUMERIC_ENTITY.matcher(s);
-        final StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String repl;
-            try {
-                final int code = Integer.parseInt(m.group(2), m.group(1).isEmpty() ? 10 : 16);
-                repl = new String(Character.toChars(code));
-            } catch (final IllegalArgumentException e) {
-                repl = m.group();
-            }
-            m.appendReplacement(sb, Matcher.quoteReplacement(repl));
-        }
-        m.appendTail(sb);
-        return sb.toString()
-                .replace("&quot;", "\"")
-                .replace("&apos;", "'")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&nbsp;", " ")
-                .replace("&amp;", "&");
     }
 
     @Override
