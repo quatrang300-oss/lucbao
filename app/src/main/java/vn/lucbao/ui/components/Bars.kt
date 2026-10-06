@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import vn.lucbao.player.PlayerController
 import vn.lucbao.player.PlayerUi
 import vn.lucbao.ui.Tab
@@ -43,6 +44,7 @@ import vn.lucbao.ui.theme.LucIcons
 fun MiniPlayer(ui: PlayerUi, onExpand: () -> Unit) {
     val c = Luc.colors
     val v = ui.video ?: return
+    val queue by PlayerController.queue.collectAsStateWithLifecycle()
     var progress by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(v.url) {
         while (true) {
@@ -69,12 +71,15 @@ fun MiniPlayer(ui: PlayerUi, onExpand: () -> Unit) {
                     fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    if (ui.quality?.audioOnly == true) "${v.channel} · Chỉ âm thanh" else v.channel,
+                    if (ui.quality?.audioOnly == true && !queue.music) "${v.channel} · Chỉ âm thanh" else v.channel,
                     color = c.muted, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
             IconTap(if (ui.isPlaying) LucIcons.Pause else LucIcons.Play, "Phát/Tạm dừng") {
                 PlayerController.togglePlay()
+            }
+            if (queue.items.isNotEmpty()) {
+                IconTap(LucIcons.Next, "Bài sau", size = 22) { PlayerController.next() }
             }
             IconTap(LucIcons.Close, "Đóng", size = 20) { PlayerController.stop() }
         }
@@ -114,6 +119,7 @@ fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
     val items = listOf(
         Triple(Tab.HOME, LucIcons.Home, "Trang chủ"),
         Triple(Tab.SEARCH, LucIcons.Search, "Khám phá"),
+        Triple(Tab.MUSIC, LucIcons.Music, "Nhạc"),
         Triple(Tab.LIBRARY, LucIcons.Library, "Thư viện"),
         Triple(Tab.SETTINGS, LucIcons.Tune, "Cài đặt"),
     )
@@ -130,7 +136,7 @@ fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
                 val on = tab == current
                 Column(
                     Modifier
-                        .width(76.dp)
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
