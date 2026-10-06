@@ -46,4 +46,5 @@ object LucIcons {
     val Download by lazy { icon("download", "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z") }
     val Replay10 by lazy { icon("rew", "M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z") }
     val Forward10 by lazy { icon("fwd", "M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z") }
+    val Subtitles by lazy { icon("subtitles", "M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z") }
 }
