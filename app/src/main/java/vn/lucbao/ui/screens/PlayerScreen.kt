@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -84,7 +85,9 @@ import kotlinx.coroutines.delay
 import vn.lucbao.data.Format
 import vn.lucbao.data.Prefs
 import vn.lucbao.data.Video
+import vn.lucbao.player.CaptionStatus
 import vn.lucbao.player.PlayerController
+import vn.lucbao.player.VoiceOver
 import vn.lucbao.player.PlayerUi
 import vn.lucbao.player.Quality
 import vn.lucbao.player.QualityChoice
@@ -119,6 +122,7 @@ fun PlayerScreen(
 ) {
     val c = Luc.colors
     var showQuality by remember { mutableStateOf(false) }
+    var showVietnamese by remember { mutableStateOf(false) }
     var morePanel by remember { mutableStateOf(false) }
     // Kept outside the panel so reopening "Nhiều video hơn" shows the list where it was left.
     val panelList = rememberLazyListState()
@@ -156,6 +160,7 @@ fun PlayerScreen(
                     onToggleFullscreen = onToggleFullscreen,
                     onQuality = { showQuality = true },
                     onLock = { onLockChange(true) },
+                    onVietnamese = { showVietnamese = true },
                     onMore = {
                         panelTouch = System.currentTimeMillis()
                         morePanel = true
@@ -176,9 +181,18 @@ fun PlayerScreen(
                     )
                 }
             }
-            if (!fullscreen) Details(ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true })
+            if (!fullscreen) {
+                Details(
+                    ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true },
+                    onVietnamese = { showVietnamese = true },
+                )
+            }
         }
         if (locked) LockOverlay(fullscreen = fullscreen, onUnlock = { onLockChange(false) })
+    }
+
+    if (showVietnamese && !locked) {
+        VietnameseSheet(onDismiss = { showVietnamese = false })
     }
 
     if (showQuality && ui.choices.isNotEmpty() && !locked) {
@@ -365,10 +379,13 @@ private fun VideoArea(
     onToggleFullscreen: () -> Unit,
     onQuality: () -> Unit,
     onLock: () -> Unit,
+    onVietnamese: () -> Unit,
     onMore: () -> Unit,
 ) {
     val c = Luc.colors
     val exo = PlayerController.exo
+    val settings by Prefs.state.collectAsStateWithLifecycle()
+    val caption by PlayerController.caption.collectAsStateWithLifecycle()
     var controls by remember { mutableStateOf(true) }
     var touch by remember { mutableIntStateOf(0) }
     var position by remember { mutableLongStateOf(0L) }
@@ -447,6 +464,35 @@ private fun VideoArea(
             }
         }
 
+        // Vietnamese subtitles, moved up while the controls are showing.
+        val line = caption
+        if (PlayerController.showsText(settings.vietnamese) && !line.isNullOrBlank() && ui.error == null) {
+            val controlsShown = controls || !ui.isPlaying
+            Text(
+                line,
+                color = Color.White,
+                fontSize = if (fullscreen) 19.sp else 13.sp,
+                lineHeight = if (fullscreen) 25.sp else 17.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = if (fullscreen) 48.dp else 14.dp)
+                    .padding(
+                        bottom = when {
+                            controlsShown && fullscreen -> 112.dp
+                            controlsShown -> 50.dp
+                            fullscreen -> 26.dp
+                            else -> 8.dp
+                        }
+                    )
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+
         AnimatedVisibility(
             visible = (controls || !ui.isPlaying) && ui.error == null,
             enter = fadeIn(), exit = fadeOut(),
@@ -485,6 +531,10 @@ private fun VideoArea(
                         )
                         Spacer(Modifier.width(4.dp))
                     }
+                    IconTap(
+                        LucIcons.Subtitles, "Dịch tiếng Việt", size = 22,
+                        tint = if (settings.vietnamese > 0) c.primary else Color.White
+                    ) { onVietnamese(); touch++ }
                     IconTap(LucIcons.Lock, "Khoá màn hình", size = 22, tint = Color.White) {
                         controls = false
                         onLock()
@@ -591,7 +641,13 @@ private fun VideoArea(
 }
 
 @Composable
-private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, onQuality: () -> Unit) {
+private fun Details(
+    ui: PlayerUi,
+    onPip: () -> Unit,
+    onPlay: (Video) -> Unit,
+    onQuality: () -> Unit,
+    onVietnamese: () -> Unit,
+) {
     val c = Luc.colors
     val context = LocalContext.current
     val d = ui.details
@@ -674,6 +730,17 @@ private fun Details(ui: PlayerUi, onPip: () -> Unit, onPlay: (Video) -> Unit, on
                     }
                 }
                 if (!audioOnly) ActionChip(LucIcons.Pip, "Thu nhỏ", false, onPip)
+                ActionChip(
+                    LucIcons.Subtitles,
+                    when (settings.vietnamese) {
+                        1 -> "Phụ đề Việt"
+                        2 -> "Phụ đề + Thuyết minh"
+                        3 -> "Thuyết minh"
+                        else -> "Dịch tiếng Việt"
+                    },
+                    settings.vietnamese > 0,
+                    onVietnamese
+                )
                 ActionChip(LucIcons.Speed, speedLabel(ui.speed), ui.speed != 1f) {
                     val i = SPEEDS.indexOf(ui.speed)
                     PlayerController.setSpeed(SPEEDS[(i + 1) % SPEEDS.size])
@@ -788,5 +855,106 @@ private fun QualitySheet(ui: PlayerUi, onDismiss: () -> Unit, onPick: (QualityCh
             }
         }
         Spacer(Modifier.height(28.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VietnameseSheet(onDismiss: () -> Unit) {
+    val c = Luc.colors
+    val context = LocalContext.current
+    val settings by Prefs.state.collectAsStateWithLifecycle()
+    val info by PlayerController.captionInfo.collectAsStateWithLifecycle()
+    val voice by VoiceOver.state.collectAsStateWithLifecycle()
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Back from the voice settings (or just opened): check again for a Vietnamese voice.
+    LifecycleResumeEffect(Unit) {
+        val s = VoiceOver.state.value
+        if (PlayerController.speaks(Prefs.current.vietnamese) &&
+            (s == VoiceOver.State.NO_VOICE || s == VoiceOver.State.NO_ENGINE)
+        ) {
+            VoiceOver.init(context, force = true)
+        }
+        onPauseOrDispose { }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = c.card) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+            Text("Dịch sang tiếng Việt", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Dùng phụ đề của video, YouTube tự dịch nếu video không có sẵn tiếng Việt. Áp dụng cho cả các video sau.",
+                color = c.muted, fontSize = 11.5.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 3.dp)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        listOf(
+            0 to "Tắt",
+            1 to "Phụ đề tiếng Việt",
+            2 to "Phụ đề + Thuyết minh (giọng đọc tiếng Việt)",
+            3 to "Chỉ thuyết minh (không hiện chữ)",
+        ).forEach { (mode, label) ->
+            val on = settings.vietnamese == mode
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { PlayerController.setVietnamese(mode) }
+                    .padding(horizontal = 22.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .border(2.dp, if (on) c.primary else c.muted, CircleShape)
+                        .padding(4.dp)
+                        .clip(CircleShape)
+                        .background(if (on) c.primary else Color.Transparent)
+                )
+                Spacer(Modifier.width(14.dp))
+                Text(label, color = if (on) c.primary else c.text, fontSize = 14.sp)
+            }
+        }
+
+        if (settings.vietnamese > 0) {
+            val sourceName = info.source?.let { tag ->
+                runCatching { java.util.Locale.forLanguageTag(tag).getDisplayLanguage(java.util.Locale("vi")) }
+                    .getOrNull()?.takeIf { it.isNotBlank() }
+            }
+            val status = when (info.status) {
+                CaptionStatus.LOADING -> "Đang tải phụ đề…"
+                CaptionStatus.READY ->
+                    if (info.translated) "Phụ đề được YouTube dịch tự động" + (sourceName?.let { " từ $it" } ?: "") + "."
+                    else "Video có sẵn phụ đề tiếng Việt."
+                CaptionStatus.NONE -> "Video này không có phụ đề nên chưa dịch được."
+                CaptionStatus.ERROR -> "Chưa tải được phụ đề. Chọn lại để thử lần nữa."
+                CaptionStatus.UNSUPPORTED -> "Bộ phát YouTube đang được cập nhật để hỗ trợ tính năng này. Thử lại sau ít phút."
+                CaptionStatus.OFF -> "Phụ đề sẽ hiện khi video bắt đầu phát."
+            }
+            Text(
+                status, color = c.muted, fontSize = 12.sp, lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)
+            )
+        }
+
+        if (PlayerController.speaks(settings.vietnamese) &&
+            (voice == VoiceOver.State.NO_VOICE || voice == VoiceOver.State.NO_ENGINE)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(c.surface2)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    "Máy chưa có giọng đọc tiếng Việt. Vào cài đặt Chuyển văn bản thành giọng nói, chọn Dịch vụ lời nói của Google và tải giọng Tiếng Việt, rồi quay lại đây.",
+                    color = c.text, fontSize = 12.5.sp, lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                PillButton("Cài giọng đọc", LucIcons.Download, { VoiceOver.openVoiceSettings(context) })
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }
