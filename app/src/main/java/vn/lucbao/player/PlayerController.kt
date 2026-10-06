@@ -67,11 +67,37 @@ data class CaptionInfo(
     val source: String? = null,
 )
 
+/** Songs played in order from the Music tab. Empty for ordinary videos. */
+data class QueueState(
+    val items: List<Video> = emptyList(),
+    val index: Int = -1,
+    /** played from the Music tab: audio only, shown in the music player */
+    val music: Boolean = false,
+    val shuffle: Boolean = false,
+    /** 0 = off, 1 = repeat all, 2 = repeat one */
+    val repeat: Int = 0,
+    /** where the songs come from, e.g. an album name or "Radio" */
+    val source: String = "",
+    /** playlist to fetch more songs from when the queue runs out (radio, long playlists) */
+    val moreUrl: String? = null,
+    val moreToken: String? = null,
+    /** order before shuffling, to restore it */
+    val original: List<Video>? = null,
+    /** the current song is being watched as a video ("Xem video"); next songs are music again */
+    val videoOnce: Boolean = false,
+) {
+    /** Whether the music player (not the video player) should be shown. */
+    val showMusicPlayer: Boolean get() = music && !videoOnce && items.isNotEmpty()
+
+    val current: Video? get() = items.getOrNull(index)
+}
+
 /** Single app-wide player shared by the UI, the media notification and picture-in-picture. */
 object PlayerController {
     private const val TAG = "PlayerController"
 
     private lateinit var app: Context
+    val appContext: Context get() = app
     lateinit var exo: ExoPlayer
         private set
 
@@ -89,6 +115,26 @@ object PlayerController {
 
     /** Quality picked by hand in this session (applies to the next videos too). */
     private var manualMaxP: Int? = null
+
+    // ---- Music queue
+    private val _queue = MutableStateFlow(QueueState())
+    val queue: StateFlow<QueueState> = _queue.asStateFlow()
+    private var shuffleOn = false
+    private var repeatMode = 0
+    private var moreJob: Job? = null
+
+    /** "Lặp lại": the current video starts over when it ends. Turned off for the next video. */
+    private val _loopVideo = MutableStateFlow(false)
+    val loopVideo: StateFlow<Boolean> = _loopVideo.asStateFlow()
+
+    fun setLoopVideo(on: Boolean) {
+        _loopVideo.value = on
+        exo.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
+    /** Sleep timer: 0 = off, -1 = after the current song, else the time to pause at. */
+    private val _sleepAt = MutableStateFlow(0L)
+    val sleepAt: StateFlow<Long> = _sleepAt.asStateFlow()
 
     // ---- Vietnamese subtitles / voice-over
     private val _captionInfo = MutableStateFlow(CaptionInfo())
@@ -154,20 +200,41 @@ object PlayerController {
             while (true) {
                 delay(150)
                 tickCaptions()
+                val sleep = _sleepAt.value
+                if (sleep > 0 && System.currentTimeMillis() >= sleep) {
+                    _sleepAt.value = 0
+                    exo.pause()
+                }
             }
         }
     }
 
     // ------------------------------------------------------------------ public actions
 
-    fun play(video: Video, rememberCurrent: Boolean = true) {
+    /**
+     * Plays one video. Called from the screens this ends any music queue; the queue itself
+     * passes [keepQueue].
+     */
+    fun play(video: Video, rememberCurrent: Boolean = true, keepQueue: Boolean = false) {
+        if (!keepQueue) {
+            moreJob?.cancel()
+            if (_queue.value.items.isNotEmpty()) _queue.value = QueueState(shuffle = shuffleOn, repeat = repeatMode)
+        }
         val current = _ui.value
         if (current.video != null && videoKey(current.video.url) == videoKey(video.url) &&
             current.details != null && current.error == null
         ) {
+            if (exo.playbackState == Player.STATE_ENDED) exo.seekTo(0)
             exo.play()
+            // Same song, now from the Music tab: switch the video stream to audio only.
+            val q = _queue.value
+            if (q.music && !q.videoOnce && current.quality?.audioOnly != true) {
+                current.choices.firstOrNull { it.audioOnly }?.let { switchQuality(it) }
+            }
             return
         }
+        // Looping is for one video: a different video plays normally.
+        if (_loopVideo.value) setLoopVideo(false)
         if (rememberCurrent && current.video != null) {
             backStack.addLast(current.video)
             while (backStack.size > 50) backStack.removeFirst()
@@ -181,8 +248,9 @@ object PlayerController {
             speed = current.speed
         )
         resetCaptions()
-        Library.recordWatch(video)
-        var resume = Library.positionOf(video.url)
+        val music = _queue.value.music
+        if (!music) Library.recordWatch(video)
+        var resume = if (music) 0L else Library.positionOf(video.url)
         if (video.live || (video.duration > 0 && resume > video.duration * 1000 - 15_000)) resume = 0
         startLoad(video, resume, null)
     }
@@ -196,6 +264,11 @@ object PlayerController {
 
     fun setQuality(choice: QualityChoice) {
         manualMaxP = if (choice.audioOnly) Quality.AUDIO_ONLY else choice.p
+        switchQuality(choice)
+    }
+
+    /** Changes the stream of the current video without changing the user's quality choice. */
+    private fun switchQuality(choice: QualityChoice) {
         val details = _ui.value.details ?: return
         val position = exo.currentPosition
         val wasPlaying = exo.playWhenReady
@@ -235,6 +308,24 @@ object PlayerController {
     }
 
     fun next() {
+        val q = _queue.value
+        if (q.items.isNotEmpty()) {
+            val n = nextIndex(q)
+            if (n != null) {
+                goTo(n)
+                return
+            }
+            if (q.moreUrl != null && q.moreToken != null) {
+                loadMoreThenNext(q.moreUrl, q.moreToken)
+                return
+            }
+            // Out of songs: carry on with what YouTube suggests (never a song already queued).
+            val have = q.items.map { videoKey(it.url) }.toHashSet()
+            val r = _ui.value.related.firstOrNull { videoKey(it.url) !in have } ?: return
+            _queue.update { it.copy(items = it.items + r, index = it.items.size, videoOnce = false) }
+            play(r, rememberCurrent = false, keepQueue = true)
+            return
+        }
         val n = upNext() ?: return
         play(n)
     }
@@ -244,6 +335,15 @@ object PlayerController {
             exo.seekTo(0)
             return
         }
+        val q = _queue.value
+        if (q.items.isNotEmpty()) {
+            when {
+                q.index > 0 -> goTo(q.index - 1)
+                q.repeat == 1 && q.items.size > 1 -> goTo(q.items.lastIndex)
+                else -> exo.seekTo(0)
+            }
+            return
+        }
         val prev = backStack.removeLastOrNull()
         if (prev != null) play(prev, rememberCurrent = false) else exo.seekTo(0)
     }
@@ -251,11 +351,272 @@ object PlayerController {
     fun stop() {
         savePosition()
         loadJob?.cancel()
+        moreJob?.cancel()
         exo.stop()
         exo.clearMediaItems()
         backStack.clear()
         resetCaptions()
+        _queue.value = QueueState(shuffle = shuffleOn, repeat = repeatMode)
+        _sleepAt.value = 0
+        if (_loopVideo.value) setLoopVideo(false)
         _ui.value = PlayerUi(speed = _ui.value.speed)
+    }
+
+    // ------------------------------------------------------------------ music queue
+
+    /** Short messages for the user ("Đã thêm vào hàng chờ"…), shown as toasts by the activity. */
+    private val _messages = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val messages: kotlinx.coroutines.flow.SharedFlow<String> = _messages
+
+    private fun say(text: String) {
+        _messages.tryEmit(text)
+    }
+
+    /**
+     * Plays [items] starting at [index] (Music tab).
+     *
+     * @param shuffle true/false sets the shuffle mode, null keeps the current one
+     * @param moreUrl/moreToken where to fetch more songs once the list runs out
+     */
+    fun playQueue(
+        items: List<Video>,
+        index: Int,
+        source: String,
+        music: Boolean = true,
+        shuffle: Boolean? = null,
+        moreUrl: String? = null,
+        moreToken: String? = null,
+    ) {
+        if (items.isEmpty()) return
+        if (_loopVideo.value) setLoopVideo(false)
+        moreJob?.cancel()
+        savePosition() // the video watched before switching to music keeps its place
+        if (shuffle != null) shuffleOn = shuffle
+        val start = if (index in items.indices) index else if (shuffleOn) items.indices.random() else 0
+        val ordered = if (shuffleOn) {
+            listOf(items[start]) + items.filterIndexed { i, _ -> i != start }.shuffled()
+        } else items
+        _queue.value = QueueState(
+            items = ordered, index = if (shuffleOn) 0 else start, music = music,
+            shuffle = shuffleOn, repeat = repeatMode, source = source,
+            moreUrl = moreUrl, moreToken = moreToken,
+            original = if (shuffleOn) items else null,
+        )
+        play(ordered[if (shuffleOn) 0 else start], rememberCurrent = false, keepQueue = true)
+    }
+
+    /** Plays the song at [index] of the queue (picked by the user). */
+    fun jumpTo(index: Int) {
+        moreJob?.cancel()
+        goTo(index)
+    }
+
+    private fun goTo(index: Int) {
+        val q = _queue.value
+        val v = q.items.getOrNull(index) ?: return
+        _queue.value = q.copy(index = index, videoOnce = false)
+        play(v, rememberCurrent = false, keepQueue = true)
+    }
+
+    /** Puts [video] right after the current song. */
+    fun playNext(video: Video) {
+        val q = ensureQueue() ?: run {
+            playQueue(listOf(video), 0, "Hàng chờ")
+            return
+        }
+        val list = q.items.toMutableList()
+        list.add((q.index + 1).coerceAtMost(list.size), video)
+        _queue.value = q.copy(items = list)
+        say("Sẽ phát tiếp theo: ${video.title}")
+    }
+
+    /** Adds [video] at the end of the queue. */
+    fun addToQueue(video: Video) {
+        val q = ensureQueue() ?: run {
+            playQueue(listOf(video), 0, "Hàng chờ")
+            return
+        }
+        _queue.value = q.copy(items = q.items + video)
+        say("Đã thêm vào hàng chờ")
+    }
+
+    fun removeFromQueue(index: Int) {
+        val q = _queue.value
+        if (index == q.index || index !in q.items.indices) return
+        val removed = q.items[index]
+        val list = q.items.toMutableList().apply { removeAt(index) }
+        _queue.value = q.copy(
+            items = list, index = if (index < q.index) q.index - 1 else q.index,
+            original = q.original?.filterNot { videoKey(it.url) == videoKey(removed.url) },
+        )
+    }
+
+    /** Shuffles the songs after the current one once (or restores the original order). */
+    fun toggleShuffle() {
+        shuffleOn = !shuffleOn
+        val q = _queue.value
+        val cur = q.current
+        if (q.items.isEmpty() || cur == null) {
+            _queue.value = q.copy(shuffle = shuffleOn)
+            return
+        }
+        _queue.value = if (shuffleOn) {
+            val rest = q.items.filterIndexed { i, _ -> i != q.index }.shuffled()
+            q.copy(items = listOf(cur) + rest, index = 0, shuffle = true, original = q.items)
+        } else {
+            val orig = q.original
+            if (orig != null) {
+                // Songs added while shuffled are kept at the end.
+                val keys = orig.map { videoKey(it.url) }.toHashSet()
+                val restored = orig + q.items.filter { videoKey(it.url) !in keys }
+                val i = restored.indexOfFirst { videoKey(it.url) == videoKey(cur.url) }.coerceAtLeast(0)
+                q.copy(items = restored, index = i, shuffle = false, original = null)
+            } else q.copy(shuffle = false)
+        }
+        say(if (shuffleOn) "Đã bật trộn bài" else "Đã tắt trộn bài")
+    }
+
+    /** off → repeat all → repeat one → off */
+    fun cycleRepeat() {
+        repeatMode = (repeatMode + 1) % 3
+        _queue.update { it.copy(repeat = repeatMode) }
+        say(
+            when (repeatMode) {
+                1 -> "Lặp lại tất cả"
+                2 -> "Lặp lại bài này"
+                else -> "Đã tắt lặp lại"
+            }
+        )
+    }
+
+    /** Endless list of similar songs ("radio") starting with [seed] or the current song. */
+    fun startRadio(seed: Video? = null) {
+        val video = seed ?: _ui.value.video ?: return
+        moreJob?.cancel()
+        say("Đang tìm các bài tương tự…")
+        moreJob = scope.launch {
+            try {
+                val page = vn.lucbao.music.MusicRepo.radio(video)
+                val seedKey = videoKey(video.url)
+                val songs = page.items.filter { it.playable }.map { it.toVideo() }
+                    .distinctBy { videoKey(it.url) }
+                    .filterNot { videoKey(it.url) == seedKey }
+                if (songs.isEmpty()) {
+                    say("Không tìm được bài tương tự")
+                    return@launch
+                }
+                val current = _ui.value.video
+                val source = "Tương tự · ${video.title.ifBlank { current?.title ?: "" }}"
+                shuffleOn = false
+                if (current != null && videoKey(current.url) == seedKey) {
+                    // Keep playing this song; the similar songs follow it.
+                    _queue.value = QueueState(
+                        items = listOf(current) + songs, index = 0, music = true, repeat = repeatMode,
+                        source = source, moreUrl = radioUrl(video), moreToken = page.next,
+                        videoOnce = !_queue.value.showMusicPlayer && _ui.value.quality?.audioOnly == false,
+                    )
+                } else {
+                    playQueue(listOf(video) + songs, 0, source, shuffle = false,
+                        moreUrl = radioUrl(video), moreToken = page.next)
+                }
+                say("Đã thêm ${songs.size} bài tương tự")
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "Radio failed", t)
+                say("Không tìm được bài tương tự")
+            }
+        }
+    }
+
+    /** Shows the current song as a video (only this song; the next ones are music again). */
+    fun watchVideo() {
+        _queue.update { it.copy(videoOnce = true) }
+        if (_ui.value.quality?.audioOnly == true) {
+            val best = Quality.pick(
+                _ui.value.choices.filterNot { it.audioOnly },
+                manualMaxP?.takeIf { it > 0 } ?: networkMaxP()
+            )
+            if (best != null) switchQuality(best)
+        }
+    }
+
+    /** Pauses after [minutes] (0 = off, -1 = when the current song ends). */
+    fun setSleepTimer(minutes: Int) {
+        _sleepAt.value = when {
+            minutes == 0 -> 0
+            minutes < 0 -> -1
+            else -> System.currentTimeMillis() + minutes * 60_000L
+        }
+        say(
+            when {
+                minutes == 0 -> "Đã tắt hẹn giờ"
+                minutes < 0 -> "Sẽ dừng khi hết bài này"
+                else -> "Sẽ dừng sau $minutes phút"
+            }
+        )
+    }
+
+    private fun radioUrl(video: Video): String? {
+        val id = videoKey(video.url).takeIf { it.length == 11 } ?: return null
+        return "https://www.youtube.com/watch?v=$id&list=RD$id"
+    }
+
+    /** The queue to edit; a single playing video becomes the first item of a new queue. */
+    private fun ensureQueue(): QueueState? {
+        val q = _queue.value
+        if (q.items.isNotEmpty()) return q
+        val current = _ui.value.video ?: return null
+        shuffleOn = false
+        val fresh = QueueState(
+            items = listOf(current), index = 0, music = true, shuffle = false,
+            repeat = repeatMode, source = "Hàng chờ",
+            // A video being watched stays a video; the queued songs play as music.
+            videoOnce = _ui.value.quality?.audioOnly != true,
+        )
+        _queue.value = fresh
+        return fresh
+    }
+
+    private fun nextIndex(q: QueueState): Int? = when {
+        q.items.isEmpty() -> null
+        q.index + 1 < q.items.size -> q.index + 1
+        q.repeat == 1 -> 0
+        else -> null
+    }
+
+    private fun loadMoreThenNext(url: String, token: String) {
+        moreJob?.cancel()
+        moreJob = scope.launch {
+            try {
+                var next: String? = token
+                var tries = 0
+                // A page can bring only songs we already have: try a few pages.
+                while (next != null && tries < 3) {
+                    tries++
+                    val page = vn.lucbao.music.MusicRepo.playlist(url, next)
+                    next = page.next
+                    val have = _queue.value.items.map { videoKey(it.url) }.toHashSet()
+                    val more = page.items.filter { it.playable }.map { it.toVideo() }
+                        .filter { videoKey(it.url) !in have }
+                    _queue.update { it.copy(items = it.items + more, moreToken = next, moreUrl = if (next == null) null else it.moreUrl) }
+                    if (more.isNotEmpty()) break
+                }
+                val q = _queue.value
+                if (q.index + 1 < q.items.size) {
+                    goTo(q.index + 1)
+                } else {
+                    _queue.update { it.copy(moreUrl = null, moreToken = null) }
+                    next()
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "More songs failed", t)
+                _queue.update { it.copy(moreUrl = null, moreToken = null) }
+                next()
+            }
+        }
     }
 
     // ------------------------------------------------------------------ Vietnamese
@@ -428,9 +789,11 @@ object PlayerController {
             try {
                 val details = withContext(Dispatchers.IO) { EngineManager.get().details(video.url) }
                 val full = details.toVideo()
-                Library.recordWatch(full)
+                val music = _queue.value.music && !_queue.value.videoOnce
+                if (_queue.value.music) Library.recordSong(full) else Library.recordWatch(full)
                 val choices = Quality.choices(details.videoOptions, details.audioOptions.isNotEmpty())
                 val choice = forced?.let { f -> choices.firstOrNull { it.label == f.label } }
+                    ?: (if (music) choices.firstOrNull { it.audioOnly } else null)
                     ?: Quality.pick(choices, preferredMaxP())
                 val audio = Quality.bestAudio(details.audioOptions)
                 val pb = withContext(Dispatchers.IO) {
@@ -470,14 +833,26 @@ object PlayerController {
         if (kind == ErrorKind.BROKEN || kind == ErrorKind.UNKNOWN) {
             Updater.requestEngineCheck(app)
         }
+        // A song that can never play here (removed, blocked…) must not stop the whole queue.
+        val q = _queue.value
+        val unplayable = kind == ErrorKind.UNAVAILABLE || kind == ErrorKind.GEO_BLOCKED ||
+            kind == ErrorKind.AGE_RESTRICTED || kind == ErrorKind.PRIVATE || kind == ErrorKind.PAID
+        if (q.items.isNotEmpty() && unplayable && q.index + 1 < q.items.size) {
+            say("Bỏ qua bài không phát được")
+            scope.launch {
+                delay(1_200)
+                if (_queue.value.index == q.index) next()
+            }
+        }
     }
 
-    private fun preferredMaxP(): Int {
-        manualMaxP?.let { return it }
+    private fun networkMaxP(): Int {
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val s = Prefs.current
         return if (cm.isActiveNetworkMetered) s.qualityMobile else s.qualityWifi
     }
+
+    private fun preferredMaxP(): Int = manualMaxP ?: networkMaxP()
 
     private fun mediaItemFor(d: VideoDetails): MediaItem {
         val meta = MediaMetadata.Builder()
@@ -493,7 +868,7 @@ object PlayerController {
 
     private fun savePosition() {
         val v = _ui.value.video ?: return
-        if (!::exo.isInitialized || v.live) return
+        if (!::exo.isInitialized || v.live || (_queue.value.music && !_queue.value.videoOnce)) return
         val pos = exo.currentPosition
         if (pos > 0) Library.updatePosition(v.url, pos)
     }
@@ -522,7 +897,15 @@ object PlayerController {
         override fun onPlaybackStateChanged(state: Int) {
             if (state == Player.STATE_ENDED) {
                 savePosition()
-                if (Prefs.current.autoplayNext) next()
+                val q = _queue.value
+                when {
+                    _sleepAt.value == -1L -> _sleepAt.value = 0 // sleep timer: stop after this song
+                    q.items.isNotEmpty() && q.repeat == 2 -> {
+                        exo.seekTo(0)
+                        exo.play()
+                    }
+                    q.items.isNotEmpty() || Prefs.current.autoplayNext -> next()
+                }
             }
         }
 
