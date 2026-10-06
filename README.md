@@ -15,6 +15,7 @@
 - **Khoá màn hình cho trẻ em**: chặn mọi thao tác trên trình phát; nhấn giữ biểu tượng ổ khoá 1,5 giây để mở.
 - Khi xem toàn màn hình: nút **Nhiều video hơn** mở danh sách video khác ở 1/3 bên phải, video vẫn phát ở 2/3 bên trái.
 - **Tải về máy**: tải video với độ phân giải tuỳ chọn (MP4 tới 1080p, WebM cho 1440p/4K) hoặc chỉ tải nhạc (M4A). Tệp lưu ở Movies/LucBao và Music/LucBao, xem lại trong Thư viện › Đã tải.
+- **Dịch sang tiếng Việt**: bấm biểu tượng phụ đề trên video (hoặc nút *Dịch tiếng Việt* dưới video) để bật **phụ đề tiếng Việt**, **phụ đề + thuyết minh** hoặc **chỉ thuyết minh** (không hiện chữ). Mặc định tắt. Phụ đề lấy từ video; nếu video không có sẵn tiếng Việt thì YouTube tự dịch. Thuyết minh dùng giọng đọc tiếng Việt của máy và tự vặn nhỏ tiếng gốc khi đọc. Video không có phụ đề thì chưa dịch được.
 - **Chọn phông chữ** trong Cài đặt: Roboto, phông của máy, Be Vietnam Pro hoặc Noto Sans. Riêng chữ "Lục Bảo" được vẽ thành hình nên luôn hiển thị đúng.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
