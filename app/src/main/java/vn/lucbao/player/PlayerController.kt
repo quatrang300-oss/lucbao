@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import vn.lucbao.api.ErrorKind
 import vn.lucbao.api.VideoDetails
 import vn.lucbao.data.Library
@@ -52,6 +53,20 @@ data class PlayerUi(
     val favorite: Boolean = false,
 )
 
+enum class CaptionStatus { OFF, LOADING, READY, NONE, ERROR, UNSUPPORTED }
+
+/** One subtitle line. */
+class Caption(val startMs: Long, val endMs: Long, val text: String)
+
+/** State of the Vietnamese subtitles for the current video. */
+data class CaptionInfo(
+    val status: CaptionStatus = CaptionStatus.OFF,
+    /** true when YouTube translated them automatically */
+    val translated: Boolean = false,
+    /** language tag of the video's own subtitles, e.g. "en" */
+    val source: String? = null,
+)
+
 /** Single app-wide player shared by the UI, the media notification and picture-in-picture. */
 object PlayerController {
     private const val TAG = "PlayerController"
@@ -74,6 +89,21 @@ object PlayerController {
 
     /** Quality picked by hand in this session (applies to the next videos too). */
     private var manualMaxP: Int? = null
+
+    // ---- Vietnamese subtitles / voice-over
+    private val _captionInfo = MutableStateFlow(CaptionInfo())
+    val captionInfo: StateFlow<CaptionInfo> = _captionInfo.asStateFlow()
+
+    /** The subtitle line to show right now (null between lines or when off). */
+    private val _caption = MutableStateFlow<String?>(null)
+    val caption: StateFlow<String?> = _caption.asStateFlow()
+
+    private var lines: List<Caption> = emptyList()
+    private var captionsFor: String? = null
+    private var captionJob: Job? = null
+    /** Index of the line on screen; [NO_LINE] forces a refresh (lineAt never returns it). */
+    private var lineIndex = NO_LINE
+    private const val NO_LINE = -2
 
     /** Safe to read from any thread. */
     val isPlayingNow: Boolean get() = _ui.value.isPlaying
@@ -120,6 +150,12 @@ object PlayerController {
                 if (exo.isPlaying) savePosition()
             }
         }
+        scope.launch {
+            while (true) {
+                delay(150)
+                tickCaptions()
+            }
+        }
     }
 
     // ------------------------------------------------------------------ public actions
@@ -144,6 +180,7 @@ object PlayerController {
             video = video, loading = true, favorite = Library.isFavorite(video.url),
             speed = current.speed
         )
+        resetCaptions()
         Library.recordWatch(video)
         var resume = Library.positionOf(video.url)
         if (video.live || (video.duration > 0 && resume > video.duration * 1000 - 15_000)) resume = 0
@@ -217,7 +254,164 @@ object PlayerController {
         exo.stop()
         exo.clearMediaItems()
         backStack.clear()
+        resetCaptions()
         _ui.value = PlayerUi(speed = _ui.value.speed)
+    }
+
+    // ------------------------------------------------------------------ Vietnamese
+
+    /** 0 = off, 1 = subtitles, 2 = subtitles + voice-over, 3 = voice-over only. Kept for later videos. */
+    fun setVietnamese(mode: Int) {
+        Prefs.update { it.copy(vietnamese = mode) }
+        if (speaks(mode)) VoiceOver.init(app) else VoiceOver.shutdown()
+        lineIndex = NO_LINE
+        if (mode == 0) {
+            _caption.value = null
+            return
+        }
+        val d = _ui.value.details ?: return
+        if (captionsFor != d.url || _captionInfo.value.status == CaptionStatus.ERROR ||
+            _captionInfo.value.status == CaptionStatus.UNSUPPORTED
+        ) {
+            loadCaptions(d.url)
+        }
+    }
+
+    /** Whether [mode] reads the subtitles aloud. */
+    fun speaks(mode: Int) = mode == 2 || mode == 3
+
+    /** Whether [mode] shows the subtitles on screen. */
+    fun showsText(mode: Int) = mode == 1 || mode == 2
+
+    private fun resetCaptions() {
+        captionJob?.cancel()
+        VoiceOver.stop()
+        lines = emptyList()
+        captionsFor = null
+        lineIndex = NO_LINE
+        _caption.value = null
+        _captionInfo.value = CaptionInfo()
+    }
+
+    private fun loadCaptions(url: String) {
+        captionJob?.cancel()
+        lines = emptyList()
+        lineIndex = NO_LINE
+        _caption.value = null
+        captionsFor = url
+        _captionInfo.value = CaptionInfo(CaptionStatus.LOADING)
+        if (speaks(Prefs.current.vietnamese)) VoiceOver.init(app)
+        captionJob = scope.launch {
+            try {
+                val engine = withContext(Dispatchers.IO) { EngineManager.get() }
+                // Found by name so engines and apps of different ages keep working together.
+                val method = runCatching {
+                    engine.javaClass.getMethod("captionsJson", String::class.java, String::class.java)
+                }.getOrNull()
+                if (method == null) {
+                    _captionInfo.value = CaptionInfo(CaptionStatus.UNSUPPORTED)
+                    Updater.requestEngineCheck(app)
+                    return@launch
+                }
+                val json = withContext(Dispatchers.IO) {
+                    try {
+                        method.invoke(engine, url, "vi") as String?
+                    } catch (e: java.lang.reflect.InvocationTargetException) {
+                        throw e.targetException ?: e
+                    }
+                }
+                val parsed = json?.let { parseCaptions(it) }
+                if (parsed == null || parsed.second.isEmpty()) {
+                    _captionInfo.value = CaptionInfo(CaptionStatus.NONE)
+                    return@launch
+                }
+                lines = mergeForSpeech(parsed.second)
+                lineIndex = NO_LINE
+                _captionInfo.value = parsed.first
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "Captions failed", t)
+                _captionInfo.value = CaptionInfo(CaptionStatus.ERROR)
+            }
+        }
+    }
+
+    private fun parseCaptions(json: String): Pair<CaptionInfo, List<Caption>> {
+        val o = JSONObject(json)
+        val arr = o.optJSONArray("lines")
+        val out = ArrayList<Caption>(arr?.length() ?: 0)
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val l = arr.optJSONArray(i) ?: continue
+                val text = l.optString(2).trim()
+                if (text.isNotEmpty()) out.add(Caption(l.optLong(0), l.optLong(1), text))
+            }
+        }
+        val info = CaptionInfo(
+            CaptionStatus.READY,
+            translated = o.optBoolean("translated"),
+            source = o.optString("source").ifBlank { null },
+        )
+        return info to out
+    }
+
+    /**
+     * Auto subtitles come in short fragments; joining neighbours into phrases reads
+     * much better aloud and is easier to follow on screen.
+     */
+    private fun mergeForSpeech(src: List<Caption>): List<Caption> {
+        val out = ArrayList<Caption>(src.size)
+        for (c in src) {
+            val text = c.text.trim()
+            if (text.isEmpty()) continue
+            val last = out.lastOrNull()
+            val joinable = last != null &&
+                c.startMs - last.endMs < 300 &&
+                c.endMs - last.startMs <= 5_500 &&
+                last.text.length + text.length <= 90 &&
+                !last.text.trimEnd().let { it.endsWith('.') || it.endsWith('?') || it.endsWith('!') }
+            if (joinable && last != null) {
+                out[out.lastIndex] = Caption(last.startMs, c.endMs, last.text + " " + text)
+            } else {
+                out.add(Caption(c.startMs, c.endMs, text))
+            }
+        }
+        return out
+    }
+
+    /** Index of the line shown at [pos], or -1 (between lines). */
+    private fun lineAt(pos: Long): Int {
+        var lo = 0
+        var hi = lines.size - 1
+        var found = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            if (lines[mid].startMs <= pos) {
+                found = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return if (found >= 0 && pos < lines[found].endMs) found else -1
+    }
+
+    private fun tickCaptions() {
+        if (!::exo.isInitialized) return
+        val mode = Prefs.current.vietnamese
+        if (mode == 0 || lines.isEmpty()) return
+        val pos = exo.currentPosition
+        val i = lineAt(pos)
+        if (i == lineIndex) return
+        lineIndex = i
+        val line = lines.getOrNull(i)
+        _caption.value = line?.text
+        // Only read a line from (near) its beginning, e.g. not after jumping into its middle.
+        if (speaks(mode) && line != null && exo.isPlaying && pos - line.startMs < 1_200) {
+            val speed = _ui.value.speed.coerceAtLeast(0.25f)
+            VoiceOver.speak(line.text, ((line.endMs - pos) / speed).toLong())
+        }
     }
 
     fun upNext(): Video? {
@@ -257,6 +451,9 @@ object PlayerController {
                         related = details.related.map { r -> r.toVideo() }
                             .distinctBy { r -> videoKey(r.url) },
                     )
+                }
+                if (Prefs.current.vietnamese > 0 && captionsFor != details.url) {
+                    loadCaptions(details.url)
                 }
             } catch (c: CancellationException) {
                 throw c
@@ -304,7 +501,22 @@ object PlayerController {
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _ui.update { it.copy(isPlaying = isPlaying) }
-            if (!isPlaying) savePosition()
+            if (!isPlaying) {
+                savePosition()
+                VoiceOver.stop()
+            }
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                // Jumped: stop the current sentence; the next line is read from its start.
+                VoiceOver.stop()
+                lineIndex = NO_LINE
+            }
         }
 
         override fun onPlaybackStateChanged(state: Int) {
