@@ -35,6 +35,8 @@ data class NavState(
     val pip: Boolean = false,
     /** bumped to ask the search field for focus */
     val focusSearch: Int = 0,
+    /** bumped each time the Shorts tab is opened from another tab (new shorts each visit) */
+    val shortsVisit: Int = 0,
 )
 
 data class FeedState(
@@ -135,7 +137,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .distinctBy { videoKey(it.url) }
     }
 
-    fun go(tab: Tab) = nav.update { it.copy(tab = tab, playerExpanded = false) }
+    fun go(tab: Tab) = nav.update {
+        it.copy(
+            tab = tab,
+            playerExpanded = false,
+            shortsVisit = if (tab == Tab.SHORTS && it.tab != Tab.SHORTS) it.shortsVisit + 1 else it.shortsVisit,
+        )
+    }
 
     fun openSearch() = nav.update {
         it.copy(tab = Tab.SEARCH, playerExpanded = false, focusSearch = it.focusSearch + 1)

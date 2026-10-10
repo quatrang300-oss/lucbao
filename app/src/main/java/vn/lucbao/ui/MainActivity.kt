@@ -364,7 +364,7 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
             Box(Modifier.weight(1f)) {
                 when (nav.tab) {
                     Tab.HOME -> HomeScreen(vm, onPlay = play)
-                    Tab.SHORTS -> ShortsScreen(active = !expanded, onOpenVideo = play)
+                    Tab.SHORTS -> ShortsScreen(active = !expanded, visit = nav.shortsVisit, onOpenVideo = play)
                     Tab.SEARCH -> SearchScreen(vm, nav.focusSearch, onPlay = play, onBack = { vm.go(Tab.HOME) })
                     Tab.MUSIC -> MusicScreen(
                         active = !expanded,
