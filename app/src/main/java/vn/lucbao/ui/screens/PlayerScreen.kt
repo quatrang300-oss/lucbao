@@ -2,7 +2,14 @@
 
 package vn.lucbao.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.media.AudioManager
+import android.provider.Settings
+import android.view.Window
+import android.view.WindowManager
 import android.graphics.Color as AColor
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -24,6 +31,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +62,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -87,6 +96,7 @@ import vn.lucbao.data.Prefs
 import vn.lucbao.data.Video
 import vn.lucbao.player.CaptionStatus
 import vn.lucbao.player.PlayerController
+import vn.lucbao.player.PlayerStats
 import vn.lucbao.player.VoiceOver
 import vn.lucbao.player.PlayerUi
 import vn.lucbao.player.Quality
@@ -105,6 +115,43 @@ import vn.lucbao.ui.theme.LucIcons
 
 private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
 private const val PANEL_HIDE_MS = 10_000L
+
+/** Brightness picked by swiping in full screen; reused the next time full screen opens. */
+private var sessionBrightness: Float? = null
+
+private const val GESTURE_NONE = 0
+private const val GESTURE_BRIGHTNESS = 1
+private const val GESTURE_VOLUME = 2
+
+private fun Context.findActivity(): Activity? {
+    var c: Context? = this
+    while (c is ContextWrapper) {
+        if (c is Activity) return c
+        c = c.baseContext
+    }
+    return null
+}
+
+private fun setWindowBrightness(w: Window, value: Float) {
+    val lp = w.attributes
+    lp.screenBrightness = value
+    w.attributes = lp
+}
+
+/** 0..1, from the window override or else (roughly) from the system setting. */
+private fun currentBrightness(activity: Activity?): Float {
+    val own = activity?.window?.attributes?.screenBrightness ?: -1f
+    if (own >= 0f) return own
+    val cr = activity?.contentResolver ?: return 0.5f
+    // With auto-brightness the saved value is not what the screen shows: start from the middle.
+    val auto = runCatching {
+        Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE) ==
+            Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+    }.getOrDefault(false)
+    if (auto) return 0.5f
+    val sys = runCatching { Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS) }.getOrDefault(128)
+    return (sys / 255f).coerceIn(0.01f, 1f)
+}
 
 private fun speedLabel(s: Float): String =
     (if (s == s.toInt().toFloat()) "${s.toInt()}.0" else s.toString()).replace('.', ',') + "×"
@@ -410,6 +457,31 @@ private fun VideoArea(
         }
     }
 
+    // Full screen: swipe up/down on the left half for brightness, on the right half for volume.
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    var gestureKind by remember { mutableIntStateOf(GESTURE_NONE) }
+    var gestureLevel by remember { mutableFloatStateOf(0f) }
+    var gestureActive by remember { mutableStateOf(false) }
+    // Hide the brightness / volume bar a moment after the finger is lifted.
+    LaunchedEffect(gestureActive, gestureKind) {
+        if (!gestureActive && gestureKind != GESTURE_NONE) {
+            delay(700)
+            gestureKind = GESTURE_NONE
+        }
+    }
+    // The brightness only applies in full screen: leaving it gives the phone's brightness back.
+    DisposableEffect(fullscreen, activity) {
+        val w = activity?.window
+        if (fullscreen && w != null) sessionBrightness?.let { setWindowBrightness(w, it) }
+        onDispose {
+            if (fullscreen && w != null) {
+                setWindowBrightness(w, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+            }
+        }
+    }
+
     Box(
         modifier
             .background(Color.Black)
@@ -421,6 +493,61 @@ private fun VideoArea(
                         controls = true
                         touch++
                     }
+                )
+            }
+            .pointerInput(fullscreen) {
+                if (!fullscreen) return@pointerInput
+                var kind = GESTURE_NONE
+                var level = 0f
+                var volMax = 1
+                detectVerticalDragGestures(
+                    onDragStart = { o ->
+                        // Leave the top and bottom edges to the system's own swipe gestures.
+                        val edge = size.height * 0.08f
+                        kind = when {
+                            o.y < edge || o.y > size.height - edge -> GESTURE_NONE
+                            controls && o.y > size.height * 0.72f -> GESTURE_NONE // seek bar / buttons
+                            o.x < size.width / 2 -> GESTURE_BRIGHTNESS
+                            audio.isVolumeFixed -> GESTURE_NONE
+                            else -> GESTURE_VOLUME
+                        }
+                        level = when (kind) {
+                            GESTURE_BRIGHTNESS -> currentBrightness(activity)
+                            GESTURE_VOLUME -> {
+                                volMax = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / volMax
+                            }
+                            else -> 0f
+                        }
+                        if (kind != GESTURE_NONE) {
+                            gestureKind = kind
+                            gestureLevel = level
+                            gestureActive = true
+                        }
+                    },
+                    onDragEnd = { gestureActive = false },
+                    onDragCancel = { gestureActive = false },
+                    onVerticalDrag = { change, dy ->
+                        if (kind != GESTURE_NONE) {
+                            change.consume()
+                            // A swipe over most of the screen height goes from 0 to 100 %.
+                            level = (level - dy / (size.height * 0.8f)).coerceIn(0f, 1f)
+                            when (kind) {
+                                GESTURE_BRIGHTNESS -> {
+                                    val b = level.coerceAtLeast(0.01f)
+                                    sessionBrightness = b
+                                    activity?.window?.let { setWindowBrightness(it, b) }
+                                }
+                                GESTURE_VOLUME -> {
+                                    val v = Math.round(level * volMax)
+                                    if (v != audio.getStreamVolume(AudioManager.STREAM_MUSIC)) {
+                                        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0) }
+                                    }
+                                }
+                            }
+                            gestureLevel = level
+                        }
+                    },
                 )
             }
     ) {
@@ -490,6 +617,19 @@ private fun VideoArea(
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color.Black.copy(alpha = 0.62f))
                     .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+
+        if (gestureKind != GESTURE_NONE) {
+            GestureLevel(gestureKind, gestureLevel, Modifier.align(Alignment.TopCenter).padding(top = 48.dp))
+        }
+
+        val statsOn by PlayerController.showStats.collectAsStateWithLifecycle()
+        if (statsOn && ui.error == null && ui.quality?.audioOnly != true) {
+            StatsOverlay(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = if (fullscreen) 24.dp else 10.dp, top = if (fullscreen) 56.dp else 44.dp)
             )
         }
 
@@ -891,7 +1031,88 @@ private fun QualitySheet(ui: PlayerUi, onDismiss: () -> Unit, onPick: (QualityCh
                 if (q.audioOnly) Text("tiết kiệm dữ liệu", color = c.muted, fontSize = 11.sp)
             }
         }
-        Spacer(Modifier.height(28.dp))
+        Text(
+            "Mạng yếu thì video tự giảm độ nét một chút, mạng ổn lại tự nét như mức đã chọn.",
+            color = c.muted, fontSize = 11.5.sp, lineHeight = 16.sp,
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp)
+        )
+        val statsOn by PlayerController.showStats.collectAsStateWithLifecycle()
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Thông số video", color = c.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            SmallToggle(LucIcons.Speed, if (statsOn) "Đang hiện" else "Hiện", statsOn) {
+                PlayerController.setShowStats(!statsOn)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** The bar shown while swiping for brightness or volume in full screen. */
+@Composable
+private fun GestureLevel(kind: Int, level: Float, modifier: Modifier) {
+    val c = Luc.colors
+    val icon = when {
+        kind == GESTURE_BRIGHTNESS -> LucIcons.Brightness
+        level <= 0f -> LucIcons.VolumeOff
+        else -> LucIcons.Volume
+    }
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.65f))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, if (kind == GESTURE_BRIGHTNESS) "Độ sáng" else "Âm lượng", tint = Color.White, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.width(130.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.25f))) {
+            Box(Modifier.fillMaxWidth(level.coerceIn(0f, 1f)).fillMaxHeight().background(c.primary))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text("${Math.round(level * 100)}%", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(36.dp))
+    }
+}
+
+/** "Thông số video": what is really playing and how well the network keeps up. */
+@Composable
+private fun StatsOverlay(modifier: Modifier) {
+    var st by remember { mutableStateOf(PlayerStats()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            st = PlayerController.stats()
+            delay(1_000)
+        }
+    }
+    fun mbps(bits: Long) = if (bits <= 0) "—" else String.format(java.util.Locale.ROOT, "%.1f Mb/s", bits / 1_000_000.0).replace('.', ',')
+    val playing = if (st.width > 0 && st.height > 0) {
+        "${st.width}×${st.height}" + (if (st.fps > 0) " · ${st.fps}fps" else "") +
+            (st.codec?.let { " · " + it.substringBefore('.') } ?: "")
+    } else "—"
+    Column(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.68f))
+            .clickable { PlayerController.setShowStats(false) }
+            .padding(horizontal = 10.dp, vertical = 7.dp)
+    ) {
+        StatLine("Đang phát", playing)
+        StatLine("Mức đã chọn", st.cap ?: "—")
+        StatLine("Độ nặng video", mbps(st.videoBitrate.toLong()))
+        StatLine("Tốc độ mạng", mbps(st.network))
+        StatLine("Đã tải trước", "${st.bufferedMs / 1000} giây")
+        StatLine("Số lần phải chờ tải", st.stalls.toString())
+        Text("Chạm để ẩn", color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+    }
+}
+
+@Composable
+private fun StatLine(label: String, value: String) {
+    Row {
+        Text("$label: ", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+        Text(value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
