@@ -1,6 +1,7 @@
 package vn.lucbao.engine;
 
 import org.schabi.newpipe.extractor.Image;
+import org.schabi.newpipe.extractor.MediaFormat;
 import org.schabi.newpipe.extractor.InfoItem;
 import org.schabi.newpipe.extractor.ListExtractor;
 import org.schabi.newpipe.extractor.NewPipe;
@@ -31,6 +32,7 @@ import org.schabi.newpipe.extractor.localization.Localization;
 import org.schabi.newpipe.extractor.search.SearchExtractor;
 import org.schabi.newpipe.extractor.search.SearchInfo;
 import org.schabi.newpipe.extractor.services.youtube.ItagItem;
+import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager;
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubeOtfDashManifestCreator;
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubePostLiveStreamDvrDashManifestCreator;
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubeProgressiveDashManifestCreator;
@@ -38,22 +40,27 @@ import org.schabi.newpipe.extractor.stream.AudioStream;
 import org.schabi.newpipe.extractor.stream.AudioTrackType;
 import org.schabi.newpipe.extractor.stream.DeliveryMethod;
 import org.schabi.newpipe.extractor.stream.Stream;
+import org.schabi.newpipe.extractor.stream.StreamExtractor;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.extractor.stream.SubtitlesStream;
 import org.schabi.newpipe.extractor.stream.VideoStream;
+import org.schabi.newpipe.extractor.utils.Parser;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
@@ -354,7 +361,9 @@ public final class EngineImpl implements Engine {
 
     @Override
     public VideoDetails details(final String url) throws Exception {
-        final StreamInfo info = StreamInfo.getInfo(yt, url);
+        final StreamExtractor extractor = yt.getStreamExtractor(url);
+        final StreamInfo info = StreamInfo.getInfo(extractor);
+        addMissingHighResStreams(extractor, info);
         infos.put(url, info);
         infos.put(info.getUrl(), info);
 
@@ -395,6 +404,179 @@ public final class EngineImpl implements Engine {
                 info.getTextualUploadDate(), plainDescription(info.getDescription()),
                 info.getDuration(), pickImage(info.getThumbnails(), 720), live,
                 videos, audios, related);
+    }
+
+    // ------------------------------------------------------------------ 8K
+
+    /** Raw player responses kept by the YouTube extractor: data field, cpn field, poToken field. */
+    private static final String[][] RAW_SOURCES = {
+            {"visionOsStreamingData", "visionOsCpn", null},
+            {"androidStreamingData", "androidCpn", "androidStreamingUrlsPoToken"},
+            {"iosStreamingData", "iosCpn", "iosStreamingUrlsPoToken"},
+    };
+
+    /**
+     * The extractor only knows a fixed list of YouTube formats and silently drops the others,
+     * among them every 8K format. Adds those (high resolutions only, no HDR) from the raw player
+     * responses. Any problem here just means no extra formats; normal playback is untouched.
+     */
+    private static void addMissingHighResStreams(final StreamExtractor extractor,
+                                                 final StreamInfo info) {
+        if (info.getStreamType() != StreamType.VIDEO_STREAM) {
+            return;
+        }
+        try {
+            final List<VideoStream> extra = new ArrayList<>();
+            final Set<Integer> added = new HashSet<>();
+            for (final String[] src : RAW_SOURCES) {
+                // nanojson objects are plain maps and lists (the library itself is not on our
+                // compile classpath).
+                final Object data = readField(extractor, src[0]);
+                if (!(data instanceof Map)) {
+                    continue;
+                }
+                final Object cpn = readField(extractor, src[1]);
+                final Object pot = src[2] == null ? null : readField(extractor, src[2]);
+                final Object formats = ((Map<?, ?>) data).get("adaptiveFormats");
+                if (!(formats instanceof List)) {
+                    continue;
+                }
+                for (final Object o : (List<?>) formats) {
+                    if (!(o instanceof Map)) {
+                        continue;
+                    }
+                    final Map<?, ?> f = (Map<?, ?>) o;
+                    final int itag = jInt(f, "itag", -1);
+                    if (itag < 0 || ItagItem.isSupported(itag) || added.contains(itag)) {
+                        continue;
+                    }
+                    try {
+                        final VideoStream v = rawHighResStream(info.getId(), f, itag,
+                                cpn instanceof String ? (String) cpn : null,
+                                pot instanceof String ? (String) pot : null);
+                        if (v != null) {
+                            extra.add(v);
+                            added.add(itag);
+                        }
+                    } catch (final Exception ignored) {
+                        // e.g. the n parameter could not be decoded: skip this format
+                    }
+                }
+            }
+            if (!extra.isEmpty()) {
+                final List<VideoStream> all = new ArrayList<>(info.getVideoOnlyStreams());
+                all.addAll(extra);
+                info.setVideoOnlyStreams(all);
+            }
+        } catch (final Throwable ignored) {
+            // extractor internals changed: no extra formats
+        }
+    }
+
+    private static Object readField(final Object target, final String name) {
+        try {
+            final Field f = target.getClass().getDeclaredField(name);
+            f.setAccessible(true);
+            return f.get(target);
+        } catch (final Throwable e) {
+            return null;
+        }
+    }
+
+    private static int jInt(final Map<?, ?> m, final String key, final int fallback) {
+        final Object v = m == null ? null : m.get(key);
+        return v instanceof Number ? ((Number) v).intValue() : fallback;
+    }
+
+    private static String jStr(final Map<?, ?> m, final String key, final String fallback) {
+        final Object v = m == null ? null : m.get(key);
+        return v instanceof String ? (String) v : fallback;
+    }
+
+    private static long jLongStr(final Map<?, ?> m, final String key) {
+        try {
+            return Long.parseLong(jStr(m, key, "-1"));
+        } catch (final NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static Map<?, ?> jObj(final Map<?, ?> m, final String key) {
+        final Object v = m.get(key);
+        return v instanceof Map ? (Map<?, ?>) v : Collections.emptyMap();
+    }
+
+    private static VideoStream rawHighResStream(final String videoId, final Map<?, ?> f,
+                                                final int itag, final String cpn,
+                                                final String pot) throws Exception {
+        final String mimeType = jStr(f, "mimeType", "");
+        final MediaFormat format;
+        if (mimeType.startsWith("video/webm")) {
+            format = MediaFormat.WEBM;
+        } else if (mimeType.startsWith("video/mp4")) {
+            format = MediaFormat.MPEG_4;
+        } else {
+            return null;
+        }
+        if ("FORMAT_STREAM_TYPE_OTF".equalsIgnoreCase(jStr(f, "type", ""))
+                || jStr(f, "qualityLabel", "").contains("HDR")) {
+            return null;
+        }
+        final int width = jInt(f, "width", 0);
+        final int height = jInt(f, "height", 0);
+        final int shortSide = Math.min(width, height);
+        if (shortSide < 1440) {
+            return null;
+        }
+
+        String url = jStr(f, "url", null);
+        if (url == null) {
+            final String cipher = jStr(f, "signatureCipher", jStr(f, "cipher", null));
+            if (cipher == null || cipher.isEmpty()) {
+                return null;
+            }
+            final Map<String, String> parts = Parser.compatParseMap(cipher);
+            final String signature = YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId,
+                    parts.getOrDefault("s", ""));
+            url = parts.get("url") + "&" + parts.getOrDefault("sp", "sig") + "=" + signature;
+        }
+        url = YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId,
+                url);
+        if (cpn != null) {
+            url += "&cpn=" + cpn;
+        }
+        if (pot != null) {
+            url += "&pot=" + pot;
+        }
+
+        final int fps = jInt(f, "fps", 30);
+        final String resolution = shortSide + "p" + (fps > 30 ? String.valueOf(fps) : "");
+        final ItagItem item = new ItagItem(itag, ItagItem.ItagType.VIDEO_ONLY, format,
+                resolution, fps);
+        item.setBitrate(jInt(f, "bitrate", 0));
+        item.setWidth(width);
+        item.setHeight(height);
+        item.setFps(fps);
+        final Map<?, ?> init = jObj(f, "initRange");
+        final Map<?, ?> index = jObj(f, "indexRange");
+        item.setInitStart((int) jLongStr(init, "start"));
+        item.setInitEnd((int) jLongStr(init, "end"));
+        item.setIndexStart((int) jLongStr(index, "start"));
+        item.setIndexEnd((int) jLongStr(index, "end"));
+        item.setQuality(jStr(f, "quality", null));
+        item.setCodec(mimeType.contains("codecs") ? mimeType.split("\"")[1] : "");
+        item.setContentLength(jLongStr(f, "contentLength"));
+        item.setApproxDurationMs(jLongStr(f, "approxDurationMs"));
+        item.setLastModified(jLongStr(f, "lastModified"));
+
+        return new VideoStream.Builder()
+                .setId(String.valueOf(itag))
+                .setContent(url, true)
+                .setMediaFormat(format)
+                .setIsVideoOnly(true)
+                .setResolution(resolution)
+                .setItagItem(item)
+                .build();
     }
 
     // ------------------------------------------------------------------ music
