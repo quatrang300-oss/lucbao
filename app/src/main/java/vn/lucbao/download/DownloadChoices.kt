@@ -27,6 +27,7 @@ data class DownloadChoice(
         }
     val badge: String?
         get() = when {
+            p >= 4320 -> "8K"
             p >= 2160 -> "4K"
             p >= 1440 -> "2K"
             p >= 1080 -> "HD"
