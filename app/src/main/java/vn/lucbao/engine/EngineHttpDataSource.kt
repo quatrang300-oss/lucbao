@@ -6,8 +6,11 @@ import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 /**
  * HTTP data source whose requests are shaped by the engine (headers, POST body,
@@ -16,18 +19,29 @@ import androidx.media3.datasource.TransferListener
  */
 class EngineHttpDataSource private constructor(
     private val kind: Int,
-    private val upstream: DefaultHttpDataSource,
+    private val upstream: HttpDataSource,
 ) : DataSource {
 
     class Factory(private val kind: Int) : DataSource.Factory {
-        override fun createDataSource(): DataSource = EngineHttpDataSource(
-            kind,
-            DefaultHttpDataSource.Factory()
-                .setConnectTimeoutMs(15_000)
-                .setReadTimeoutMs(20_000)
-                .setAllowCrossProtocolRedirects(true)
-                .createDataSource()
-        )
+        override fun createDataSource(): DataSource =
+            EngineHttpDataSource(kind, OkHttpDataSource.Factory(client).createDataSource())
+    }
+
+    companion object {
+        /**
+         * One client for every video request: connections to YouTube stay open and are reused
+         * (HTTP/2 when offered), so each new piece of video starts downloading right away
+         * instead of connecting again.
+         */
+        private val client: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
     }
 
     override fun addTransferListener(transferListener: TransferListener) {
