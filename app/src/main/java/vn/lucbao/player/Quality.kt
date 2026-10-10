@@ -88,6 +88,7 @@ object Quality {
     }
 
     private fun badge(p: Int): String? = when {
+        p >= 4320 -> "8K"
         p >= 2160 -> "4K"
         p >= 1440 -> "2K"
         p >= 1080 -> "HD"

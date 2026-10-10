@@ -15,7 +15,11 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +33,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import vn.lucbao.api.AudioOption
 import vn.lucbao.api.ErrorKind
+import vn.lucbao.api.Playback
+import vn.lucbao.api.Track
 import vn.lucbao.api.VideoDetails
 import vn.lucbao.data.Library
 import vn.lucbao.data.Prefs
@@ -65,6 +72,23 @@ data class CaptionInfo(
     val translated: Boolean = false,
     /** language tag of the video's own subtitles, e.g. "en" */
     val source: String? = null,
+)
+
+/** "Thông số": what is really playing and how the network keeps up. */
+data class PlayerStats(
+    val width: Int = 0,
+    val height: Int = 0,
+    val fps: Int = 0,
+    val codec: String? = null,
+    /** bits per second of the video being played, 0 when unknown */
+    val videoBitrate: Int = 0,
+    /** the quality picked (the most the player goes up to) */
+    val cap: String? = null,
+    /** network speed estimate, bits per second */
+    val network: Long = 0,
+    val bufferedMs: Long = 0,
+    /** times playback had to wait for data in this video */
+    val stalls: Int = 0,
 )
 
 /** Songs played in order from the Music tab. Empty for ordinary videos. */
@@ -154,10 +178,82 @@ object PlayerController {
     /** Safe to read from any thread. */
     val isPlayingNow: Boolean get() = _ui.value.isPlaying
 
+    // ---- Smooth playback
+    private lateinit var bandwidthMeter: DefaultBandwidthMeter
+    private var stalls = 0
+    private var lastState = Player.STATE_IDLE
+    private var seekedAt = 0L
+
+    /** "Thông số" overlay on the video. */
+    private val _showStats = MutableStateFlow(false)
+    val showStats: StateFlow<Boolean> = _showStats.asStateFlow()
+
+    fun setShowStats(on: Boolean) {
+        _showStats.value = on
+    }
+
+    fun stats(): PlayerStats {
+        if (!::exo.isInitialized) return PlayerStats()
+        val f = exo.videoFormat
+        return PlayerStats(
+            width = f?.width?.takeIf { it > 0 } ?: 0,
+            height = f?.height?.takeIf { it > 0 } ?: 0,
+            fps = f?.frameRate?.takeIf { it > 0 }?.let { Math.round(it) } ?: 0,
+            codec = f?.codecs ?: f?.sampleMimeType,
+            videoBitrate = f?.bitrate?.takeIf { it > 0 } ?: 0,
+            cap = _ui.value.quality?.label,
+            network = if (::bandwidthMeter.isInitialized) bandwidthMeter.bitrateEstimate else 0,
+            bufferedMs = exo.totalBufferedDuration,
+            stalls = stalls,
+        )
+    }
+
     fun init(context: Context) {
         if (::exo.isInitialized) return
         app = context.applicationContext
+        // Starts each session from the network speed measured last time, so the first video
+        // doesn't begin at a needlessly low quality.
+        // Kept apart for Wi-Fi and mobile data, so 4G never starts at the Wi-Fi speed.
+        bandwidthMeter = DefaultBandwidthMeter.Builder(app).apply {
+            val prefs = runCatching { playerPrefs() }.getOrNull()
+            val wifi = prefs?.getLong(KEY_BITRATE_WIFI, 0L) ?: 0L
+            val cell = prefs?.getLong(KEY_BITRATE_CELL, 0L) ?: 0L
+            if (wifi > 0) {
+                setInitialBitrateEstimate(C.NETWORK_TYPE_WIFI, wifi)
+                setInitialBitrateEstimate(C.NETWORK_TYPE_ETHERNET, wifi)
+            }
+            if (cell > 0) {
+                listOf(C.NETWORK_TYPE_3G, C.NETWORK_TYPE_4G, C.NETWORK_TYPE_5G_NSA, C.NETWORK_TYPE_5G_SA)
+                    .forEach { setInitialBitrateEstimate(it, cell) }
+            }
+        }.build()
+        // Several qualities (up to the one picked) are given to the player at once: it quietly
+        // steps down when the network can't keep up and back up when it can, without pausing.
+        val trackSelector = DefaultTrackSelector(
+            app,
+            AdaptiveTrackSelection.Factory(
+                /* minDurationForQualityIncreaseMs = */ 5_000,
+                /* maxDurationForQualityDecreaseMs = */ 20_000,
+                /* minDurationToRetainAfterDiscardMs = */ 20_000,
+                /* bandwidthFraction = */ 0.75f,
+            )
+        )
+        // The quality picked is the limit, not the screen size (4K/8K on a 1080p screen is allowed).
+        trackSelector.setParameters(trackSelector.buildUponParameters().clearViewportSizeConstraints())
+        // Read further ahead (up to 2 minutes, within the usual memory limit) so short network
+        // dips don't stop the video; start again as soon as a little is loaded.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 60_000,
+                /* maxBufferMs = */ 120_000,
+                /* bufferForPlaybackMs = */ 2_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 4_000,
+            )
+            .build()
         exo = ExoPlayer.Builder(app)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .setBandwidthMeter(bandwidthMeter)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -243,6 +339,7 @@ object PlayerController {
         exo.stop()
         exo.clearMediaItems()
         retried = false
+        stalls = 0
         _ui.value = PlayerUi(
             video = video, loading = true, favorite = Library.isFavorite(video.url),
             speed = current.speed
@@ -277,9 +374,9 @@ object PlayerController {
         loadJob = scope.launch {
             try {
                 val audio = Quality.bestAudio(details.audioOptions)
-                val pb = withContext(Dispatchers.IO) {
-                    EngineManager.get().resolve(details.url, choice.video?.id, audio?.id)
-                }
+                val choices = _ui.value.choices
+                val pb = withContext(Dispatchers.IO) { resolveSteps(details, choices, choice, audio) }
+                seekedAt = System.currentTimeMillis() // reloading is not a network stall
                 exo.setMediaSource(MediaSources.build(pb, mediaItemFor(details)), position)
                 exo.prepare()
                 exo.playWhenReady = wasPlaying
@@ -796,9 +893,7 @@ object PlayerController {
                     ?: (if (music) choices.firstOrNull { it.audioOnly } else null)
                     ?: Quality.pick(choices, preferredMaxP())
                 val audio = Quality.bestAudio(details.audioOptions)
-                val pb = withContext(Dispatchers.IO) {
-                    EngineManager.get().resolve(details.url, choice?.video?.id, audio?.id)
-                }
+                val pb = withContext(Dispatchers.IO) { resolveSteps(details, choices, choice, audio) }
                 exo.setMediaSource(MediaSources.build(pb, mediaItemFor(details)), startMs)
                 exo.playbackParameters = PlaybackParameters(_ui.value.speed)
                 exo.prepare()
@@ -846,6 +941,86 @@ object PlayerController {
         }
     }
 
+    /**
+     * The picked quality plus a few lower ones of the same kind, merged into one DASH stream so
+     * the player can move between them by itself without stopping. Falls back to the picked
+     * quality alone whenever merging isn't possible (live, audio only, segmented streams…).
+     */
+    private fun resolveSteps(
+        details: VideoDetails,
+        choices: List<QualityChoice>,
+        choice: QualityChoice?,
+        audio: AudioOption?,
+    ): Playback {
+        val engine = EngineManager.get()
+        val main = engine.resolve(details.url, choice?.video?.id, audio?.id)
+        val picked = choice ?: return main
+        val top = picked.video ?: return main
+        if (details.live || !top.videoOnly) return main
+        val mainVideo = main.tracks.firstOrNull {
+            it.kind == Track.KIND_DASH && it.mime?.startsWith("video/") == true && isSingleFileDash(it)
+        }
+            ?: return main
+        val family = codecFamily(top.codec)
+        val lower = choices.filter { q ->
+            val v = q.video
+            v != null && v.videoOnly && q.p < picked.p && v.mime == top.mime && codecFamily(v.codec) == family
+        }.distinctBy { it.p }.take(MAX_STEPS)
+        if (lower.isEmpty()) return main
+        val extra = StringBuilder()
+        for (q in lower) {
+            try {
+                val pb = engine.resolve(details.url, q.video?.id, audio?.id)
+                val t = pb.tracks.firstOrNull { it.kind == Track.KIND_DASH && isSingleFileDash(it) && it.mime == mainVideo.mime }
+                    ?: continue
+                REPRESENTATION.find(t.manifest)?.let { extra.append(it.value) }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                Log.w(TAG, "Lower step ${q.label} unavailable", e)
+            }
+        }
+        val manifest = mainVideo.manifest
+        val end = manifest.lastIndexOf("</AdaptationSet>")
+        if (extra.isEmpty() || end < 0) return main
+        val merged = manifest.substring(0, end) + extra + manifest.substring(end)
+        return Playback(main.tracks.map { if (it === mainVideo) Track(it.kind, it.uri, merged, it.mime) else it })
+    }
+
+    /** One file per quality with an index (not live / segmented): safe to merge. */
+    private fun isSingleFileDash(t: Track): Boolean {
+        val m = t.manifest ?: return false
+        return m.contains("<SegmentBase") && REPRESENTATION.findAll(m).count() == 1
+    }
+
+    private fun codecFamily(codec: String?): String {
+        val c = codec?.lowercase() ?: return ""
+        return when {
+            c.startsWith("av01") -> "av1"
+            c.startsWith("vp9") || c.startsWith("vp09") -> "vp9"
+            c.startsWith("avc") -> "avc"
+            else -> c.substringBefore('.')
+        }
+    }
+
+    private fun playerPrefs() = app.getSharedPreferences("player", Context.MODE_PRIVATE)
+
+    private fun saveBitrateEstimate() {
+        if (!::bandwidthMeter.isInitialized) return
+        val b = bandwidthMeter.bitrateEstimate
+        if (b <= 0) return
+        runCatching {
+            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val key = if (cm.isActiveNetworkMetered) KEY_BITRATE_CELL else KEY_BITRATE_WIFI
+            playerPrefs().edit().putLong(key, b).apply()
+        }
+    }
+
+    private const val MAX_STEPS = 4
+    private const val KEY_BITRATE_WIFI = "bitrate_wifi"
+    private const val KEY_BITRATE_CELL = "bitrate_cell"
+    private val REPRESENTATION = Regex("<Representation[\\s>][\\s\\S]*?</Representation>")
+
     private fun networkMaxP(): Int {
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val s = Prefs.current
@@ -879,6 +1054,7 @@ object PlayerController {
             if (!isPlaying) {
                 savePosition()
                 VoiceOver.stop()
+                saveBitrateEstimate()
             }
         }
 
@@ -888,6 +1064,7 @@ object PlayerController {
             reason: Int,
         ) {
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                seekedAt = System.currentTimeMillis()
                 // Jumped: stop the current sentence; the next line is read from its start.
                 VoiceOver.stop()
                 lineIndex = NO_LINE
@@ -895,6 +1072,11 @@ object PlayerController {
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            // Waiting for data in the middle of playing (not after a jump): shown in "Thông số".
+            if (state == Player.STATE_BUFFERING && lastState == Player.STATE_READY && exo.playWhenReady &&
+                System.currentTimeMillis() - seekedAt > 1_500
+            ) stalls++
+            lastState = state
             if (state == Player.STATE_ENDED) {
                 savePosition()
                 val q = _queue.value
@@ -919,6 +1101,7 @@ object PlayerController {
             if (!retried && !network) {
                 // Stream links expire after a few hours: fetch fresh ones once.
                 retried = true
+                seekedAt = System.currentTimeMillis()
                 _ui.update { it.copy(loading = true) }
                 startLoad(video, exo.currentPosition.coerceAtLeast(0), _ui.value.quality)
                 return
