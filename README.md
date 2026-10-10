@@ -4,13 +4,15 @@
 
 ## Tính năng
 
-- Xem video chất lượng tới **4K 60fps** (tự bỏ những mức máy không giải mã nổi), hoặc **chỉ âm thanh** để tiết kiệm 4G.
+- Xem video chất lượng tới **8K** (tự bỏ những mức máy không giải mã nổi), hoặc **chỉ âm thanh** để tiết kiệm 4G.
+- **Phát mượt khi mạng yếu**: mạng chậm thì video tự giảm độ nét một chút thay vì dừng lại chờ tải, mạng ổn lại tự nét như mức đã chọn (không hiện thông báo). Bấm *Chất lượng → Thông số video* để xem độ phân giải đang phát, tốc độ mạng và số lần phải chờ tải.
 - **Nghe nền / tắt màn hình**, điều khiển trên màn hình khoá, thông báo và tai nghe Bluetooth.
 - **Hình trong hình (PiP)**: về màn hình chính thì video tự thu thành cửa sổ nổi.
 - Trang chủ: *Dành cho bạn* (gợi ý dựa trên video đã xem), Âm nhạc, Trò chơi, Phim & Trailer, Podcast, Trực tiếp.
 - Tìm kiếm có gợi ý. Dán link YouTube hoặc bấm *Chia sẻ → Lục Bảo* từ Zalo, Messenger, trình duyệt… để mở thẳng video.
 - **Lịch sử** có thanh tiến độ (mở lại là xem tiếp đúng chỗ đang dừng) và **Yêu thích**. Mọi thứ lưu trên máy, không cần tài khoản.
 - Tốc độ phát 0,75×–2×, tự phát video tiếp theo, chạm đúp hai bên video để tua 10 giây.
+- Khi xem toàn màn hình: vuốt lên/xuống ở nửa trái để chỉnh **độ sáng**, nửa phải để chỉnh **âm lượng**.
 - **Theo dõi kênh không cần tài khoản**: video mới của các kênh đang theo dõi luôn hiện đầu tiên ở Trang chủ (mục *Dành cho bạn* và *Đang theo dõi*). Danh sách chỉ lưu trên máy.
 - **Khoá màn hình cho trẻ em**: chặn mọi thao tác trên trình phát; nhấn giữ biểu tượng ổ khoá 1,5 giây để mở.
 - Khi xem toàn màn hình: nút **Nhiều video hơn** mở danh sách video khác ở 1/3 bên phải, video vẫn phát ở 2/3 bên trái.
@@ -23,6 +25,8 @@
   - Trình phát nhạc riêng: chỉ phát âm thanh (tiết kiệm 4G), nghe nền, hàng chờ (phát tiếp theo / thêm vào hàng chờ), trộn bài, lặp lại tất cả / một bài.
   - *Bài tương tự* (phát liên tục các bài giống bài đang nghe), hẹn giờ tắt nhạc, tải bài hát, chuyển sang xem video.
 - **Lặp lại video**: ở mục *Tiếp theo* dưới video, bấm *Lặp lại* để video đang xem tự phát lại khi hết.
+- **Shorts**: tab riêng giữa *Trang chủ* và *Khám phá*. Vuốt lên/xuống để xem video ngắn, chạm để dừng, chạm đúp để thích. Có các chủ đề (Dành cho bạn, Hài hước, Âm nhạc, Ẩm thực, Thể thao, Thú cưng) và *Kênh theo dõi*. Mỗi lần mở lại tab là có video mới, không lặp lại video đã xem; đang ở video đầu mà muốn đổi thì vuốt xuống (hoặc bấm lại chủ đề đang chọn).
+- **Cài đặt** nằm ở biểu tượng bánh răng góc trên Trang chủ.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
 ## Tự cập nhật hoạt động thế nào
