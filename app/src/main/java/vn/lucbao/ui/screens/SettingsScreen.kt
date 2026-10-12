@@ -184,6 +184,14 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
             Toggle("Tự phát video tiếp theo", s.autoplayNext) { v -> Prefs.update { it.copy(autoplayNext = v) } }
         }
 
+        Card("Mục ở thanh dưới cùng") {
+            Toggle("Shorts", s.tabShorts) { v -> Prefs.update { it.copy(tabShorts = v) } }
+            Toggle("Khám phá", s.tabSearch) { v -> Prefs.update { it.copy(tabSearch = v) } }
+            Toggle("Nhạc", s.tabMusic) { v -> Prefs.update { it.copy(tabMusic = v) } }
+            Toggle("Thư viện", s.tabLibrary) { v -> Prefs.update { it.copy(tabLibrary = v) } }
+            Body("Trang chủ luôn hiện. Tắt Khám phá thì vẫn tìm video được bằng ô tìm kiếm ở Trang chủ. Tắt Thư viện thì Lịch sử, Yêu thích và video đã tải sẽ không mở được cho tới khi bật lại.")
+        }
+
         Card("Cập nhật tự động") {
             Body("Lục Bảo tự cập nhật — bạn không cần làm gì. Khi YouTube thay đổi, bộ phát mới được tải về và dùng ngay, không cần cài lại.")
             Spacer(Modifier.height(8.dp))

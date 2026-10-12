@@ -16,6 +16,8 @@ import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -113,7 +115,8 @@ import vn.lucbao.ui.components.errorText
 import vn.lucbao.ui.theme.Luc
 import vn.lucbao.ui.theme.LucIcons
 
-private val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
+/** 0,25× to 4×, every 0,25. */
+private val SPEEDS = (1..16).map { it * 0.25f }
 private const val PANEL_HIDE_MS = 10_000L
 
 /** Brightness picked by swiping in full screen; reused the next time full screen opens. */
@@ -169,6 +172,7 @@ fun PlayerScreen(
 ) {
     val c = Luc.colors
     var showQuality by remember { mutableStateOf(false) }
+    var showSpeed by remember { mutableStateOf(false) }
     var showVietnamese by remember { mutableStateOf(false) }
     var morePanel by remember { mutableStateOf(false) }
     // Kept outside the panel so reopening "Nhiều video hơn" shows the list where it was left.
@@ -206,6 +210,7 @@ fun PlayerScreen(
                     onCollapse = onCollapse,
                     onToggleFullscreen = onToggleFullscreen,
                     onQuality = { showQuality = true },
+                    onSpeed = { showSpeed = true },
                     onLock = { onLockChange(true) },
                     onVietnamese = { showVietnamese = true },
                     onMore = {
@@ -231,6 +236,7 @@ fun PlayerScreen(
             if (!fullscreen) {
                 Details(
                     ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true },
+                    onSpeed = { showSpeed = true },
                     onVietnamese = { showVietnamese = true },
                 )
             }
@@ -240,6 +246,13 @@ fun PlayerScreen(
 
     if (showVietnamese && !locked) {
         VietnameseSheet(onDismiss = { showVietnamese = false })
+    }
+
+    if (showSpeed && !locked) {
+        SpeedSheet(ui.speed, onDismiss = { showSpeed = false }) {
+            PlayerController.setSpeed(it)
+            showSpeed = false
+        }
     }
 
     if (showQuality && ui.choices.isNotEmpty() && !locked) {
@@ -425,6 +438,7 @@ private fun VideoArea(
     onCollapse: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onQuality: () -> Unit,
+    onSpeed: () -> Unit,
     onLock: () -> Unit,
     onVietnamese: () -> Unit,
     onMore: () -> Unit,
@@ -709,6 +723,9 @@ private fun VideoArea(
 
                 val upNext = ui.related.firstOrNull()
                 val showMore = fullscreen && !panelOpen && upNext != null
+                val isLive = ui.video?.live == true || ui.details?.live == true
+                // Full screen: playback speed at the bottom left, on the "Nhiều video hơn" row.
+                val showSpeedButton = fullscreen && !isLive
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -716,7 +733,7 @@ private fun VideoArea(
                         .padding(
                             start = 12.dp, end = 4.dp,
                             bottom = when {
-                                showMore -> 58.dp
+                                showMore || showSpeedButton -> 58.dp
                                 fullscreen -> 12.dp
                                 else -> 0.dp
                             }
@@ -756,6 +773,30 @@ private fun VideoArea(
                     )
                 }
 
+                if (showSpeedButton) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 16.dp, bottom = 10.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = if (ui.speed != 1f) 0.22f else 0.12f))
+                            .clickable { onSpeed(); touch++ }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            LucIcons.Speed, "Tốc độ phát",
+                            tint = if (ui.speed != 1f) c.primary else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Tốc độ " + speedLabel(ui.speed), color = Color.White, fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 if (showMore && upNext != null) {
                     // YouTube-style: "Nhiều video hơn" + thumbnail, under the seek bar on the right.
                     Row(
@@ -786,6 +827,7 @@ private fun Details(
     onPip: () -> Unit,
     onPlay: (Video) -> Unit,
     onQuality: () -> Unit,
+    onSpeed: () -> Unit,
     onVietnamese: () -> Unit,
 ) {
     val c = Luc.colors
@@ -881,9 +923,8 @@ private fun Details(
                     settings.vietnamese > 0,
                     onVietnamese
                 )
-                ActionChip(LucIcons.Speed, speedLabel(ui.speed), ui.speed != 1f) {
-                    val i = SPEEDS.indexOf(ui.speed)
-                    PlayerController.setSpeed(SPEEDS[(i + 1) % SPEEDS.size])
+                if (ui.video?.live != true && ui.details?.live != true) {
+                    ActionChip(LucIcons.Speed, speedLabel(ui.speed), ui.speed != 1f, onSpeed)
                 }
                 if (ui.choices.isNotEmpty()) {
                     ActionChip(LucIcons.Tune, ui.quality?.label ?: "Chất lượng", false, onQuality)
@@ -977,6 +1018,42 @@ private fun ActionChip(icon: ImageVector, text: String, on: Boolean, onClick: ()
         Icon(icon, null, tint = if (on) c.primary else c.text, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
         Text(text, color = if (on) c.primary else c.text, fontSize = 12.sp)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun SpeedSheet(current: Float, onDismiss: () -> Unit, onPick: (Float) -> Unit) {
+    val c = Luc.colors
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = c.card) {
+        Text(
+            "Tốc độ phát", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)
+        )
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SPEEDS.forEach { rate ->
+                val on = rate == current
+                Text(
+                    if (rate == 1f) "Bình thường" else speedLabel(rate),
+                    color = if (on) c.primary else c.text,
+                    fontSize = 13.5.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (on) c.primary.copy(alpha = 0.18f) else c.surface2)
+                        .border(1.dp, if (on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(50))
+                        .clickable { onPick(rate) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(28.dp))
     }
 }
 
