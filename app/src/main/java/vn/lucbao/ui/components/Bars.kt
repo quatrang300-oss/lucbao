@@ -114,7 +114,7 @@ fun IconTap(
 }
 
 @Composable
-fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
+fun BottomNav(current: Tab, visible: Set<Tab>, onSelect: (Tab) -> Unit) {
     val c = Luc.colors
     val items = listOf(
         Triple(Tab.HOME, LucIcons.Home, "Trang chủ"),
@@ -122,7 +122,7 @@ fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
         Triple(Tab.SEARCH, LucIcons.Search, "Khám phá"),
         Triple(Tab.MUSIC, LucIcons.Music, "Nhạc"),
         Triple(Tab.LIBRARY, LucIcons.Library, "Thư viện"),
-    )
+    ).filter { it.first == Tab.HOME || it.first in visible }
     Column(Modifier.fillMaxWidth().background(c.surface)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
         Row(
