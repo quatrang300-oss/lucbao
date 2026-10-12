@@ -11,7 +11,8 @@
 - Trang chủ: *Dành cho bạn* (gợi ý dựa trên video đã xem), Âm nhạc, Trò chơi, Phim & Trailer, Podcast, Trực tiếp.
 - Tìm kiếm có gợi ý. Dán link YouTube hoặc bấm *Chia sẻ → Lục Bảo* từ Zalo, Messenger, trình duyệt… để mở thẳng video.
 - **Lịch sử** có thanh tiến độ (mở lại là xem tiếp đúng chỗ đang dừng) và **Yêu thích**. Mọi thứ lưu trên máy, không cần tài khoản.
-- Tốc độ phát 0,75×–2×, tự phát video tiếp theo, chạm đúp hai bên video để tua 10 giây.
+- Tốc độ phát từ 0,25× đến 4× (mỗi mốc 0,25): nút dưới video, hoặc nút *Tốc độ* ở góc dưới bên trái khi xem toàn màn hình. Tự phát video tiếp theo, chạm đúp hai bên video để tua 10 giây.
+- Trong Cài đặt có thể **ẩn bớt mục ở thanh dưới cùng** (Shorts, Khám phá, Nhạc, Thư viện); Trang chủ luôn hiện.
 - Khi xem toàn màn hình: vuốt lên/xuống ở nửa trái để chỉnh **độ sáng**, nửa phải để chỉnh **âm lượng**.
 - **Theo dõi kênh không cần tài khoản**: video mới của các kênh đang theo dõi luôn hiện đầu tiên ở Trang chủ (mục *Dành cho bạn* và *Đang theo dõi*). Danh sách chỉ lưu trên máy.
 - **Khoá màn hình cho trẻ em**: chặn mọi thao tác trên trình phát; nhấn giữ biểu tượng ổ khoá 1,5 giây để mở.
