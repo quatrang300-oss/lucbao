@@ -30,6 +30,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -359,6 +362,20 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
     }
     BackHandler(enabled = !expanded && nav.tab != Tab.HOME) { vm.go(Tab.HOME) }
 
+    // Tabs turned off in Cài đặt leave the bottom bar. Khám phá still opens from the search box
+    // on Trang chủ; a hidden tab that is open goes back to Trang chủ.
+    val settings by Prefs.state.collectAsStateWithLifecycle()
+    val shownTabs = buildSet {
+        if (settings.tabShorts) add(Tab.SHORTS)
+        if (settings.tabSearch) add(Tab.SEARCH)
+        if (settings.tabMusic) add(Tab.MUSIC)
+        if (settings.tabLibrary) add(Tab.LIBRARY)
+    }
+    LaunchedEffect(nav.tab, shownTabs) {
+        val hideable = nav.tab == Tab.SHORTS || nav.tab == Tab.MUSIC || nav.tab == Tab.LIBRARY
+        if (hideable && nav.tab !in shownTabs) vm.go(Tab.HOME)
+    }
+
     Box(Modifier.fillMaxSize().background(c.surface)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
@@ -378,7 +395,9 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
             if (ui.video != null && !expanded && nav.tab != Tab.SHORTS) {
                 MiniPlayer(ui, onExpand = { vm.nav.update { it.copy(playerExpanded = true) } })
             }
-            BottomNav(nav.tab, onSelect = { vm.go(it) })
+            // Only Trang chủ left: no bar needed.
+            if (shownTabs.isNotEmpty()) BottomNav(nav.tab, shownTabs, onSelect = { vm.go(it) })
+            else Spacer(Modifier.fillMaxWidth().navigationBarsPadding()) // keep clear of the system bar
         }
         AnimatedVisibility(
             visible = expanded,
