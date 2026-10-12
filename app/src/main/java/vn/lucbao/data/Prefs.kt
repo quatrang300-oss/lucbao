@@ -21,6 +21,11 @@ data class Settings(
     val font: Int = 0,
     /** 0 = off, 1 = Vietnamese subtitles, 2 = subtitles + voice-over, 3 = voice-over only */
     val vietnamese: Int = 0,
+    /** which tabs show in the bottom bar (Trang chủ always does) */
+    val tabShorts: Boolean = true,
+    val tabSearch: Boolean = true,
+    val tabMusic: Boolean = true,
+    val tabLibrary: Boolean = true,
 )
 
 object Prefs {
@@ -41,6 +46,10 @@ object Prefs {
             onboarded = sp.getBoolean("onboarded", false),
             font = sp.getInt("font", 0),
             vietnamese = sp.getInt("vietnamese", 0),
+            tabShorts = sp.getBoolean("tabShorts", true),
+            tabSearch = sp.getBoolean("tabSearch", true),
+            tabMusic = sp.getBoolean("tabMusic", true),
+            tabLibrary = sp.getBoolean("tabLibrary", true),
         )
     }
 
@@ -57,6 +66,10 @@ object Prefs {
             .putBoolean("onboarded", s.onboarded)
             .putInt("font", s.font)
             .putInt("vietnamese", s.vietnamese)
+            .putBoolean("tabShorts", s.tabShorts)
+            .putBoolean("tabSearch", s.tabSearch)
+            .putBoolean("tabMusic", s.tabMusic)
+            .putBoolean("tabLibrary", s.tabLibrary)
             .apply()
     }
 }
