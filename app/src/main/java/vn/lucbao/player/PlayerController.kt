@@ -44,6 +44,7 @@ import vn.lucbao.data.Video
 import vn.lucbao.data.toVideo
 import vn.lucbao.data.videoKey
 import vn.lucbao.engine.EngineManager
+import vn.lucbao.kids.KidsStore
 import vn.lucbao.update.Updater
 
 data class PlayerUi(
@@ -178,6 +179,10 @@ object PlayerController {
     /** Safe to read from any thread. */
     val isPlayingNow: Boolean get() = _ui.value.isPlaying
 
+    /** Chế độ Trẻ em: replaces YouTube's suggestions (up next, autoplay) with the kids' own list. */
+    @Volatile
+    var relatedOverride: ((Video) -> List<Video>)? = null
+
     // ---- Smooth playback
     private lateinit var bandwidthMeter: DefaultBandwidthMeter
     private var stalls = 0
@@ -296,6 +301,8 @@ object PlayerController {
             while (true) {
                 delay(150)
                 tickCaptions()
+                // Chế độ Trẻ em: time is up, nothing plays (also in the background / PiP).
+                if (KidsStore.isTimeUp() && exo.isPlaying) exo.pause()
                 val sleep = _sleepAt.value
                 if (sleep > 0 && System.currentTimeMillis() >= sleep) {
                     _sleepAt.value = 0
@@ -346,7 +353,8 @@ object PlayerController {
         )
         resetCaptions()
         val music = _queue.value.music
-        if (!music) Library.recordWatch(video)
+        // Kids mode keeps its own history out of "Dành cho bạn".
+        if (!music && !KidsStore.isActive) Library.recordWatch(video)
         var resume = if (music) 0L else Library.positionOf(video.url)
         if (video.live || (video.duration > 0 && resume > video.duration * 1000 - 15_000)) resume = 0
         startLoad(video, resume, null)
@@ -902,7 +910,7 @@ object PlayerController {
                 val details = withContext(Dispatchers.IO) { EngineManager.get().details(video.url) }
                 val full = details.toVideo()
                 val music = _queue.value.music && !_queue.value.videoOnce
-                if (_queue.value.music) Library.recordSong(full) else Library.recordWatch(full)
+                if (_queue.value.music) Library.recordSong(full) else if (!KidsStore.isActive) Library.recordWatch(full)
                 val choices = Quality.choices(details.videoOptions, details.audioOptions.isNotEmpty())
                 val choice = forced?.let { f -> choices.firstOrNull { it.label == f.label } }
                     ?: (if (music) choices.firstOrNull { it.audioOnly } else null)
@@ -922,8 +930,8 @@ object PlayerController {
                         error = null,
                         choices = if (details.live) emptyList() else choices,
                         quality = if (details.live) null else choice,
-                        related = details.related.map { r -> r.toVideo() }
-                            .distinctBy { r -> videoKey(r.url) },
+                        related = relatedOverride?.invoke(full)
+                            ?: details.related.map { r -> r.toVideo() }.distinctBy { r -> videoKey(r.url) },
                     )
                 }
                 applySpeedAudio()
