@@ -28,6 +28,7 @@
 - **Lặp lại video**: ở mục *Tiếp theo* dưới video, bấm *Lặp lại* để video đang xem tự phát lại khi hết.
 - **Shorts**: tab riêng giữa *Trang chủ* và *Khám phá*. Vuốt lên/xuống để xem video ngắn, chạm để dừng, chạm đúp để thích. Có các chủ đề (Dành cho bạn, Hài hước, Âm nhạc, Ẩm thực, Thể thao, Thú cưng) và *Kênh theo dõi*. Mỗi lần mở lại tab là có video mới, không lặp lại video đã xem; đang ở video đầu mà muốn đổi thì vuốt xuống (hoặc bấm lại chủ đề đang chọn).
 - **Cài đặt** nằm ở biểu tượng bánh răng góc trên Trang chủ.
+- **Chế độ Trẻ em** (nút **KID** cạnh bánh răng ở Trang chủ): bé chỉ xem được video từ các kênh bố mẹ chọn, chia theo chủ đề; video tiếp theo và tự phát cũng chỉ lấy từ các kênh này. Thoát bằng mã PIN của bố mẹ, có hẹn giờ xem (15–60 phút hoặc không giới hạn), lịch sử của bé không lẫn vào gợi ý của người lớn.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
 ## Tự cập nhật hoạt động thế nào
