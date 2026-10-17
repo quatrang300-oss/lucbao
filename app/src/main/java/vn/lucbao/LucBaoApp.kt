@@ -19,6 +19,7 @@ class LucBaoApp : Application(), SingletonImageLoader.Factory {
         Library.init(this)
         EngineManager.init(this)
         PlayerController.init(this)
+        vn.lucbao.kids.KidsStore.init(this)
         Notifications.createChannels(this)
         Updater.init(this)
         Updater.schedule(this)
