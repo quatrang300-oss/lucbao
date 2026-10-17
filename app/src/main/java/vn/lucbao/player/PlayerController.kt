@@ -370,6 +370,7 @@ object PlayerController {
         val position = exo.currentPosition
         val wasPlaying = exo.playWhenReady
         _ui.update { it.copy(quality = choice) }
+        applySpeedAudio()
         loadJob?.cancel()
         loadJob = scope.launch {
             try {
@@ -391,6 +392,20 @@ object PlayerController {
     fun setSpeed(speed: Float) {
         exo.playbackParameters = PlaybackParameters(speed)
         _ui.update { it.copy(speed = speed) }
+        applySpeedAudio()
+    }
+
+    /**
+     * Android plays sound only up to 8x: faster than that the video plays without sound (with
+     * the sound on, the player would silently stay at 8x). Never when sound is all there is.
+     */
+    private fun applySpeedAudio() {
+        val audioOnly = _ui.value.quality?.audioOnly == true || _queue.value.showMusicPlayer
+        val mute = _ui.value.speed > 8f && !audioOnly
+        val p = exo.trackSelectionParameters
+        if (p.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO) != mute) {
+            exo.trackSelectionParameters = p.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, mute).build()
+        }
     }
 
     fun toggleFavorite() {
@@ -896,6 +911,7 @@ object PlayerController {
                 val pb = withContext(Dispatchers.IO) { resolveSteps(details, choices, choice, audio) }
                 exo.setMediaSource(MediaSources.build(pb, mediaItemFor(details)), startMs)
                 exo.playbackParameters = PlaybackParameters(_ui.value.speed)
+                applySpeedAudio()
                 exo.prepare()
                 exo.playWhenReady = true
                 _ui.update {
@@ -910,6 +926,7 @@ object PlayerController {
                             .distinctBy { r -> videoKey(r.url) },
                     )
                 }
+                applySpeedAudio()
                 if (Prefs.current.vietnamese > 0 && captionsFor != details.url) {
                     loadCaptions(details.url)
                 }
