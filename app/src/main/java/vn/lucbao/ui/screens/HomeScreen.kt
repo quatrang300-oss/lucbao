@@ -92,6 +92,9 @@ fun HomeScreen(vm: AppViewModel, onPlay: (Video) -> Unit) {
                 ) {
                     BrandMark(24.dp)
                     Spacer(Modifier.weight(1f))
+                    // Chế độ Trẻ em
+                    KidBadge { vn.lucbao.kids.KidsStore.enter() }
+                    Spacer(Modifier.width(4.dp))
                     // Settings moved here from the bottom bar (which now has Shorts).
                     vn.lucbao.ui.components.IconTap(LucIcons.Settings, "Cài đặt", size = 24, tint = c.text) {
                         vm.go(vn.lucbao.ui.Tab.SETTINGS)

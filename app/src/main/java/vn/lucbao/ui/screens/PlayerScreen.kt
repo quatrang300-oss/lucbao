@@ -1010,6 +1010,8 @@ private fun Details(
     var channelSheet by remember { mutableStateOf(false) }
     var downloadSheet by remember { mutableStateOf(false) }
     val channelUrl = d?.channelUrl ?: v.channelUrl
+    // Chế độ Trẻ em: no channel page, following, downloads or sharing (ways out of the kids' list).
+    val kids by vn.lucbao.kids.KidsStore.active.collectAsStateWithLifecycle()
 
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "info") {
@@ -1045,7 +1047,7 @@ private fun Details(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = channelUrl != null) { channelSheet = true }
+                    .clickable(enabled = channelUrl != null && !kids) { channelSheet = true }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1058,7 +1060,7 @@ private fun Details(
                         Text("${Format.count(subs)} người theo dõi", color = c.muted, fontSize = 11.sp)
                     }
                 }
-                if (channelUrl != null && v.channel.isNotBlank()) {
+                if (channelUrl != null && v.channel.isNotBlank() && !kids) {
                     FollowButton(channelUrl, v.channel, d?.channelAvatar)
                 }
             }
@@ -1113,10 +1115,10 @@ private fun Details(
                 if (ui.choices.isNotEmpty()) {
                     ActionChip(LucIcons.Tune, ui.quality?.label ?: "Chất lượng", false, onQuality)
                 }
-                if (d != null && !d.live) {
+                if (d != null && !d.live && !kids) {
                     ActionChip(LucIcons.Download, "Tải về", false) { downloadSheet = true }
                 }
-                ActionChip(LucIcons.Share, "Chia sẻ", false) {
+                if (!kids) ActionChip(LucIcons.Share, "Chia sẻ", false) {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(Intent.EXTRA_TEXT, v.url)
                     context.startActivity(Intent.createChooser(send, "Chia sẻ video"))
