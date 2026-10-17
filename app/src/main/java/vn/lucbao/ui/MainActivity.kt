@@ -184,11 +184,12 @@ class MainActivity : ComponentActivity() {
                 vm.nav.update { it.copy(playerExpanded = true) }
             }
             Intent.ACTION_SEND -> {
+                if (vn.lucbao.kids.KidsStore.isActive) return // kids only watch their own channels
                 val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
                 val url = Regex("https?://\\S+").find(text)?.value ?: return
                 openUrl(url)
             }
-            Intent.ACTION_VIEW -> intent.dataString?.let { openUrl(it) }
+            Intent.ACTION_VIEW -> if (!vn.lucbao.kids.KidsStore.isActive) intent.dataString?.let { openUrl(it) }
         }
     }
 
@@ -360,7 +361,8 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
         if (nav.fullscreen) vm.nav.update { it.copy(fullscreen = false) }
         else vm.nav.update { it.copy(playerExpanded = false) }
     }
-    BackHandler(enabled = !expanded && nav.tab != Tab.HOME) { vm.go(Tab.HOME) }
+    val kidsOn by vn.lucbao.kids.KidsStore.active.collectAsStateWithLifecycle()
+    BackHandler(enabled = !expanded && nav.tab != Tab.HOME && !kidsOn) { vm.go(Tab.HOME) }
 
     // Tabs turned off in Cài đặt leave the bottom bar. Khám phá still opens from the search box
     // on Trang chủ; a hidden tab that is open goes back to Trang chủ.
@@ -379,7 +381,9 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
     Box(Modifier.fillMaxSize().background(c.surface)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
-                when (nav.tab) {
+                // Chế độ Trẻ em replaces every tab until a parent leaves it with the PIN.
+                if (kidsOn) vn.lucbao.ui.screens.KidsScreen(expanded = expanded, onPlay = play)
+                else when (nav.tab) {
                     Tab.HOME -> HomeScreen(vm, onPlay = play)
                     Tab.SHORTS -> ShortsScreen(active = !expanded, visit = nav.shortsVisit, onOpenVideo = play)
                     Tab.SEARCH -> SearchScreen(vm, nav.focusSearch, onPlay = play, onBack = { vm.go(Tab.HOME) })
@@ -392,11 +396,11 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
                 }
             }
             // The Shorts tab is full screen video: no mini player there.
-            if (ui.video != null && !expanded && nav.tab != Tab.SHORTS) {
+            if (ui.video != null && !expanded && (kidsOn || nav.tab != Tab.SHORTS)) {
                 MiniPlayer(ui, onExpand = { vm.nav.update { it.copy(playerExpanded = true) } })
             }
             // Only Trang chủ left: no bar needed.
-            if (shownTabs.isNotEmpty()) BottomNav(nav.tab, shownTabs, onSelect = { vm.go(it) })
+            if (shownTabs.isNotEmpty() && !kidsOn) BottomNav(nav.tab, shownTabs, onSelect = { vm.go(it) })
             else Spacer(Modifier.fillMaxWidth().navigationBarsPadding()) // keep clear of the system bar
         }
         AnimatedVisibility(
@@ -419,6 +423,10 @@ private fun Main(vm: AppViewModel, actions: ScreenActions) {
                 )
             }
         }
+        // Kids' time is up: covers everything (also the player) until a parent gives more time.
+        if (kidsOn) vn.lucbao.ui.screens.KidsTimeUp(onTimeUp = {
+            vm.nav.update { it.copy(playerExpanded = false, fullscreen = false) }
+        })
     }
 
     // Child lock: the back gesture does nothing until the screen is unlocked. Every other
