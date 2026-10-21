@@ -1,6 +1,7 @@
 package vn.lucbao.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
@@ -8,32 +9,35 @@ import androidx.compose.ui.unit.dp
 
 /** Material-style icons drawn from path data (no extra icon library needed). */
 object LucIcons {
-    private fun icon(name: String, d: String): ImageVector =
+    private fun icon(name: String, d: String, evenOdd: Boolean = false): ImageVector =
         ImageVector.Builder(
             name = name,
             defaultWidth = 24.dp,
             defaultHeight = 24.dp,
             viewportWidth = 24f,
             viewportHeight = 24f,
-        ).addPath(pathData = addPathNodes(d), fill = SolidColor(Color.Black)).build()
+        ).addPath(
+            pathData = addPathNodes(d), fill = SolidColor(Color.Black),
+            pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero,
+        ).build()
 
     val Home by lazy { icon("home", "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z") }
-    val Search by lazy { icon("search", "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z") }
+    val Search by lazy { icon("search", "M 15.5 14 h -.79 l -.28 -.27 A 6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16 c 1.61 0 3.09 -.59 4.23 -1.57 l .27 .28 v .79 l 5 4.99 L 20.49 19 l -4.99 -5 z m -6 0 C 7.01 14 5 11.99 5 9.5 S 7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14 z", evenOdd = true) }
     val Library by lazy { icon("lib", "M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z") }
     val Tune by lazy { icon("tune", "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z") }
     val Brightness by lazy { icon("brightness", "M20 15.31L23.31 12 20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69zM12 18V6c3.31 0 6 2.69 6 6s-2.69 6-6 6z") }
     val Volume by lazy { icon("volume", "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z") }
-    val VolumeOff by lazy { icon("volume_off", "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z") }
+    val VolumeOff by lazy { icon("volume_off", "M 16.5 12 c 0 -1.77 -1.02 -3.29 -2.5 -4.03 v 2.21 l 2.45 2.45 c .03 -.2 .05 -.41 .05 -.63 z m 2.5 0 c 0 .94 -.2 1.82 -.54 2.64 l 1.51 1.51 A 8.796 8.796 0 0 0 21 12 c 0 -4.28 -2.99 -7.86 -7 -8.77 v 2.06 c 2.89 .86 5 3.54 5 6.71 z M 4.27 3 L 3 4.27 7.73 9 H 3 v 6 h 4 l 5 5 v -6.73 l 4.25 4.25 c -.67 .52 -1.42 .93 -2.25 1.18 v 2.06 a 8.99 8.99 0 0 0 3.69 -1.81 L 19.73 21 21 19.73 l -9 -9 L 4.27 3 z M 12 4 L 9.91 6.09 12 8.18 V 4 z") }
     val Play by lazy { icon("play", "M8 5v14l11-7z") }
     val Pause by lazy { icon("pause", "M6 19h4V5H6v14zm8-14v14h4V5h-4z") }
     val Next by lazy { icon("next", "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z") }
     val Prev by lazy { icon("prev", "M6 6h2v12H6zm3.5 6l8.5 6V6z") }
     val Heart by lazy { icon("heart", "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z") }
-    val Headphones by lazy { icon("headphones", "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h3v-8H5v-1a7 7 0 0114 0v1h-3v8h3c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z") }
+    val Headphones by lazy { icon("headphones", "M 12 3 a 9 9 0 0 0 -9 9 v 7 c 0 1.1 .9 2 2 2 h 3 v -8 H 5 v -1 a 7 7 0 0 1 14 0 v 1 h -3 v 8 h 3 c 1.1 0 2 -.9 2 -2 v -7 a 9 9 0 0 0 -9 -9 z") }
     val Pip by lazy { icon("pip", "M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z") }
-    val Speed by lazy { icon("speed", "M20.38 8.57l-1.23 1.85a8 8 0 01-.22 7.58H5.07A8 8 0 0115.58 6.85l1.85-1.23A10 10 0 003.35 19a2 2 0 001.72 1h13.85a2 2 0 001.74-1 10 10 0 00-.27-10.44zm-9.79 6.84a2 2 0 002.83 0l5.66-8.49-8.49 5.66a2 2 0 000 2.83z") }
+    val Speed by lazy { icon("speed", "M 20.38 8.57 l -1.23 1.85 a 8 8 0 0 1 -.22 7.58 H 5.07 A 8 8 0 0 1 15.58 6.85 l 1.85 -1.23 A 10 10 0 0 0 3.35 19 a 2 2 0 0 0 1.72 1 h 13.85 a 2 2 0 0 0 1.74 -1 10 10 0 0 0 -.27 -10.44 z m -9.79 6.84 a 2 2 0 0 0 2.83 0 l 5.66 -8.49 -8.49 5.66 a 2 2 0 0 0 0 2.83 z") }
     val Share by lazy { icon("share", "M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z") }
-    val History by lazy { icon("history", "M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z") }
+    val History by lazy { icon("history", "M 13 3 a 9 9 0 0 0 -9 9 H 1 l 3.89 3.89 .07 .14 L 9 12 H 6 c 0 -3.87 3.13 -7 7 -7 s 7 3.13 7 7 -3.13 7 -7 7 c -1.93 0 -3.68 -.79 -4.94 -2.06 l -1.42 1.42 A 8.954 8.954 0 0 0 13 21 a 9 9 0 0 0 0 -18 z m -1 5 v 5 l 4.28 2.54 .72 -1.21 -3.5 -2.08 V 8 H 12 z") }
     val Close by lazy { icon("close", "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z") }
     val Back by lazy { icon("back", "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z") }
     val More by lazy { icon("more", "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z") }
@@ -43,7 +47,7 @@ object LucIcons {
     val Shield by lazy { icon("shield", "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z") }
     val NorthWest by lazy { icon("nw", "M5 15h2V8.41L18.59 20 20 18.59 8.41 7H15V5H5z") }
     val Check by lazy { icon("check", "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z") }
-    val Refresh by lazy { icon("refresh", "M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z") }
+    val Refresh by lazy { icon("refresh", "M 17.65 6.35 A 7.958 7.958 0 0 0 12 4 c -4.42 0 -7.99 3.58 -7.99 8 s 3.57 8 7.99 8 c 3.73 0 6.84 -2.55 7.73 -6 h -2.08 A 5.99 5.99 0 0 1 12 18 c -3.31 0 -6 -2.69 -6 -6 s 2.69 -6 6 -6 c 1.66 0 3.14 .69 4.22 1.78 L 13 11 h 7 V 4 l -2.35 2.35 z") }
     val Lock by lazy { icon("lock", "M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z") }
     val PersonAdd by lazy { icon("follow", "M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z") }
     val Download by lazy { icon("download", "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z") }
