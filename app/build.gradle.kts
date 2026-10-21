@@ -33,6 +33,9 @@ android {
                 storePassword = System.getenv("SIGNING_PASSWORD")
                 keyAlias = System.getenv("SIGNING_ALIAS") ?: "lucbao"
                 keyPassword = System.getenv("SIGNING_PASSWORD")
+                // v1 too: the APK still installs when a file-transfer app drops the v2 block.
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
