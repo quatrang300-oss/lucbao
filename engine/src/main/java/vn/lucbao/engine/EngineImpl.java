@@ -14,6 +14,8 @@ import org.schabi.newpipe.extractor.playlist.PlaylistInfo;
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo;
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs;
+import org.schabi.newpipe.extractor.comments.CommentsInfo;
+import org.schabi.newpipe.extractor.comments.CommentsInfoItem;
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException;
 import org.schabi.newpipe.extractor.feed.FeedExtractor;
 import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler;
@@ -43,6 +45,7 @@ import org.schabi.newpipe.extractor.stream.Stream;
 import org.schabi.newpipe.extractor.stream.StreamExtractor;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
+import org.schabi.newpipe.extractor.stream.StreamSegment;
 import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.extractor.stream.SubtitlesStream;
 import org.schabi.newpipe.extractor.stream.VideoStream;
@@ -936,6 +939,94 @@ public final class EngineImpl implements Engine {
                 .replace("&amp;", "&");
     }
 
+    // ------------------------------------------------------------------ chapters & comments
+
+    /**
+     * Chapters set by the uploader.
+     *
+     * <pre>{"chapters":[{"start":ms,"title":"…","thumb":"…"}]}</pre> (empty list when none)
+     */
+    public String chaptersJson(final String url) throws Exception {
+        StreamInfo info = infos.get(url);
+        if (info == null) {
+            details(url);
+            info = infos.get(url);
+        }
+        final JSONArray arr = new JSONArray();
+        if (info != null && info.getStreamSegments() != null) {
+            for (final StreamSegment seg : info.getStreamSegments()) {
+                final JSONObject o = new JSONObject();
+                o.put("start", seg.getStartTimeSeconds() * 1000L);
+                o.put("title", seg.getTitle() == null ? "" : seg.getTitle());
+                o.put("thumb", seg.getPreviewUrl() == null ? "" : seg.getPreviewUrl());
+                arr.put(o);
+            }
+        }
+        final JSONObject out = new JSONObject();
+        out.put("chapters", arr);
+        return out.toString();
+    }
+
+    /**
+     * Comments of a video (read only). {@code pageToken} is null for the first page, a "next"
+     * token for more, or a comment's "replies" token for its replies.
+     *
+     * <pre>{"count":n,"disabled":false,"items":[{"author","avatar","text","likes","time",
+     *  "replyCount","replies":token,"pinned","hearted","creator"}],"next":token}</pre>
+     */
+    public String commentsJson(final String url, final String pageToken) throws Exception {
+        final JSONObject out = new JSONObject();
+        final List<CommentsInfoItem> items;
+        final Page next;
+        if (pageToken == null) {
+            final CommentsInfo info = CommentsInfo.getInfo(yt, url);
+            out.put("disabled", info.isCommentsDisabled());
+            out.put("count", info.getCommentsCount());
+            items = info.getRelatedItems();
+            next = info.getNextPage();
+        } else {
+            final Page p = pages.get(pageToken);
+            if (p == null) {
+                out.put("items", new JSONArray());
+                return out.toString();
+            }
+            final ListExtractor.InfoItemsPage<CommentsInfoItem> page =
+                    CommentsInfo.getMoreItems(yt, url, p);
+            items = page.getItems();
+            next = page.getNextPage();
+        }
+        final JSONArray arr = new JSONArray();
+        if (items != null) {
+            for (final CommentsInfoItem c : items) {
+                final JSONObject o = new JSONObject();
+                o.put("author", c.getUploaderName() == null ? "" : c.getUploaderName());
+                final String avatar = pickImage(c.getUploaderAvatars(), 88);
+                o.put("avatar", avatar == null ? "" : avatar);
+                o.put("text", plainDescription(c.getCommentText()));
+                o.put("likes", Math.max(c.getLikeCount(), 0));
+                o.put("time", c.getTextualUploadDate() == null ? "" : c.getTextualUploadDate());
+                o.put("replyCount", Math.max(c.getReplyCount(), 0));
+                final Page replies = c.getReplies();
+                if (Page.isValid(replies)) {
+                    final String token = UUID.randomUUID().toString();
+                    pages.put(token, replies);
+                    o.put("replies", token);
+                }
+                o.put("pinned", c.isPinned());
+                o.put("hearted", c.isHeartedByUploader());
+                o.put("creator", c.isChannelOwner());
+                arr.put(o);
+            }
+        }
+        out.put("items", arr);
+        if (Page.isValid(next)) {
+            final String token = UUID.randomUUID().toString();
+            pages.put(token, next);
+            out.put("next", token);
+        }
+        return out.toString();
+    }
+
     @Override
     public Playback resolve(final String url, final String videoOptionId,
                             final String audioOptionId) throws Exception {
@@ -1250,6 +1341,25 @@ public final class EngineImpl implements Engine {
     }
 
     /** Works with both the old (getContent) and new (record content()) Description API. */
+    private static final Pattern LINK = Pattern.compile(
+            "(?is)<a\\s[^>]*?href=\"([^\"]*)\"[^>]*>(.*?)</a>");
+
+    /** "https://www.youtube.com/redirect?…&q=REAL" → REAL; HTML entities decoded. */
+    private static String realLink(final String href) {
+        String h = href.replace("&amp;", "&");
+        if (h.contains("youtube.com/redirect")) {
+            final Matcher q = Pattern.compile("[?&]q=([^&]+)").matcher(h);
+            if (q.find()) {
+                try {
+                    h = java.net.URLDecoder.decode(q.group(1), "UTF-8");
+                } catch (final Exception ignored) {
+                    // keep as is
+                }
+            }
+        }
+        return h;
+    }
+
     private static String plainDescription(final Object description) {
         if (description == null) {
             return "";
@@ -1269,7 +1379,20 @@ public final class EngineImpl implements Engine {
         if (raw == null) {
             return "";
         }
-        String s = raw.replaceAll("(?i)<br\\s*/?>", "\n")
+        // Links: keep the real address (YouTube may show a shortened "https://shope.ee/ab…"),
+        // so the app can open it. Hashtags, @names and timestamps keep their text.
+        final Matcher m = LINK.matcher(raw);
+        final StringBuffer withLinks = new StringBuffer();
+        while (m.find()) {
+            final String href = realLink(m.group(1));
+            final String text = m.group(2).replaceAll("<[^>]+>", "").trim();
+            final boolean looksLikeUrl = text.startsWith("http") || text.startsWith("www.")
+                    || text.matches("(?i)[a-z0-9][a-z0-9-]*(\\.[a-z0-9-]+)*\\.[a-z]{2,}(/.*)?");
+            final String out = looksLikeUrl && href.startsWith("http") ? href : m.group(2);
+            m.appendReplacement(withLinks, Matcher.quoteReplacement(out));
+        }
+        m.appendTail(withLinks);
+        String s = withLinks.toString().replaceAll("(?i)<br\\s*/?>", "\n")
                 .replaceAll("(?i)</p>", "\n")
                 .replaceAll("<[^>]+>", "");
         s = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
