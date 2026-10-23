@@ -29,6 +29,13 @@
 - **Shorts**: tab riêng giữa *Trang chủ* và *Khám phá*. Vuốt lên/xuống để xem video ngắn, chạm để dừng, chạm đúp để thích. Có các chủ đề (Dành cho bạn, Hài hước, Âm nhạc, Ẩm thực, Thể thao, Thú cưng) và *Kênh theo dõi*. Mỗi lần mở lại tab là có video mới, không lặp lại video đã xem; đang ở video đầu mà muốn đổi thì vuốt xuống (hoặc bấm lại chủ đề đang chọn).
 - **Cài đặt** nằm ở biểu tượng bánh răng góc trên Trang chủ.
 - **Chế độ Trẻ em** (nút **KID** cạnh bánh răng ở Trang chủ): bé chỉ xem được video từ các kênh bố mẹ chọn, chia theo chủ đề; video tiếp theo và tự phát cũng chỉ lấy từ các kênh này. Thoát bằng mã PIN của bố mẹ, có hẹn giờ xem (15–60 phút hoặc không giới hạn), lịch sử của bé không lẫn vào gợi ý của người lớn.
+- **Phóng to / thu nhỏ** khi xem toàn màn hình: chụm/mở hai ngón (1x–4x), kéo hai ngón để di chuyển khung hình. Nút **Lấp đầy** phóng vừa đủ để mất viền đen, **Vừa màn hình** để trở lại; nhãn *"2.1x · Về gốc"* để về nhanh. Mỗi video mới (hoặc thoát toàn màn hình) đều bắt đầu ở tỉ lệ gốc. Khi khoá màn hình thì không phóng được.
+- **Tự bỏ qua đoạn tài trợ** trong video (theo đánh dấu của cộng đồng SponsorBlock): đoạn tài trợ, tự quảng cáo, nhắc like/đăng ký; tuỳ chọn thêm mở đầu/kết thúc. Có nút *Xem lại*. Chỉnh trong Cài đặt › Tự bỏ qua trong video.
+- **Chương video**: thanh thời gian chia đoạn theo chương, tên chương hiện trên thanh thời gian, chạm để mở danh sách chương và nhảy nhanh.
+- **Bình luận** (chỉ đọc) dưới video, có xem phản hồi. Ẩn trong Chế độ Trẻ em.
+- **Xem sau**: lưu video để xem lúc khác (Thư viện › Xem sau), tách riêng với Yêu thích.
+- **Hẹn giờ tắt** khi xem video: 15 phút – 1 giờ 30 hoặc khi hết video này.
+- **Sao lưu & chuyển máy**: Cài đặt › Sao lưu & chuyển máy (hoặc Thư viện › ⋮) lưu kênh theo dõi, yêu thích, xem sau, bài hát đã thích và lịch sử ra một tệp; *Khôi phục* trên máy mới để thêm vào, không mất gì đang có.
 - **Tự cập nhật**: cài một lần là xong, người dùng không phải làm gì thêm.
 
 ## Tự cập nhật hoạt động thế nào
