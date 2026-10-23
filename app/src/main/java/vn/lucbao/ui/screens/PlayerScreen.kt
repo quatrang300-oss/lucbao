@@ -2,6 +2,8 @@
 
 package vn.lucbao.ui.screens
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.layout
@@ -1273,7 +1275,9 @@ private fun Details(
     // Chế độ Trẻ em: no channel page, following, downloads or sharing (ways out of the kids' list).
     val kids by vn.lucbao.kids.KidsStore.active.collectAsStateWithLifecycle()
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
         item(key = "info") {
             Column(
                 Modifier
@@ -1313,126 +1317,108 @@ private fun Details(
                             .align(Alignment.CenterHorizontally)
                             .padding(top = 6.dp)
                             .clip(RoundedCornerShape(50))
-                            .clickable { expanded = false }
+                            .clickable {
+                                expanded = false
+                                // Back to the title, no scrolling up by hand.
+                                scope.launch { listState.animateScrollToItem(0) }
+                            }
                             .padding(horizontal = 18.dp, vertical = 8.dp)
                     )
                 }
             }
         }
         item(key = "channel") {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = channelUrl != null && !kids) { channelSheet = true }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Avatar(v.channel, 36.dp, d?.channelAvatar)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(v.channel, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    val subs = d?.subscribers ?: -1
-                    if (subs > 0) {
-                        Text("${Format.count(subs)} người theo dõi", color = c.muted, fontSize = 11.sp)
+            // Left: avatar + name (at most 3/5 of the line, 2 lines, centred on the avatar);
+            // tap opens the channel sheet (it has Theo dõi). Right: "Yêu thích video".
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                val nameMax = maxWidth * 0.6f - 50.dp
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = channelUrl != null && !kids) { channelSheet = true }
+                            .padding(vertical = 2.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Avatar(v.channel, 40.dp, d?.channelAvatar)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            v.channel, color = c.text, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                            lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = nameMax.coerceAtLeast(60.dp))
+                        )
                     }
-                }
-                if (channelUrl != null && v.channel.isNotBlank() && !kids) {
-                    FollowButton(channelUrl, v.channel, d?.channelAvatar)
+                    Spacer(Modifier.weight(1f))
+                    ActionChip(
+                        if (ui.favorite) LucIcons.Heart else LucIcons.HeartOutline,
+                        "Yêu thích video", ui.favorite
+                    ) { PlayerController.toggleFavorite() }
                 }
             }
         }
         item(key = "actions") {
-            Row(
-                Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
-            ) {
-                ActionChip(LucIcons.Heart, if (ui.favorite) "Đã thích" else "Yêu thích", ui.favorite) {
-                    PlayerController.toggleFavorite()
-                }
-                val later = watchLater.any { videoKey(it.video.url) == videoKey(v.url) }
-                ActionChip(LucIcons.Bookmark, if (later) "Đã lưu xem sau" else "Xem sau", later) {
+            // Two rows of three, in this order; tools that don't apply leave and the rest move up.
+            val audioOnly = ui.quality?.audioOnly == true
+            val later = watchLater.any { videoKey(it.video.url) == videoKey(v.url) }
+            val sleepAt by PlayerController.sleepAt.collectAsStateWithLifecycle()
+            val (sleepText, sleepOn) = videoSleepLabel()
+            val tools = buildList {
+                if (d != null && !d.live && !kids) add(Tool(LucIcons.Download, "Tải về", false) { downloadSheet = true })
+                if (ui.choices.any { it.audioOnly }) add(Tool(LucIcons.Headphones, "Chỉ nghe", audioOnly) {
+                    val target = if (audioOnly) Quality.pick(ui.choices, Prefs.current.qualityWifi)
+                    else ui.choices.firstOrNull { it.audioOnly }
+                    target?.let { PlayerController.setQuality(it) }
+                })
+                if (!audioOnly) add(Tool(LucIcons.Pip, "Thu nhỏ", false, onPip))
+                add(
+                    Tool(
+                        LucIcons.Timer,
+                        when {
+                            sleepAt == -1L -> "Hết video tắt"
+                            sleepOn -> sleepText.replace("Tắt sau", "Còn")
+                            else -> "Hẹn giờ tắt"
+                        },
+                        sleepOn
+                    ) { sleepSheet = true }
+                )
+                add(Tool(LucIcons.Bookmark, if (later) "Đã lưu" else "Xem sau", later) {
                     Library.toggleWatchLater(ui.video ?: v)
-                }
-                val (sleepText, sleepOn) = videoSleepLabel()
-                ActionChip(LucIcons.Timer, sleepText, sleepOn) { sleepSheet = true }
-                val audioOnly = ui.quality?.audioOnly == true
-                if (ui.choices.any { it.audioOnly }) {
-                    ActionChip(LucIcons.Headphones, "Chỉ nghe", audioOnly) {
-                        val target = if (audioOnly) {
-                            Quality.pick(ui.choices, Prefs.current.qualityWifi)
-                        } else ui.choices.firstOrNull { it.audioOnly }
-                        target?.let { PlayerController.setQuality(it) }
-                    }
-                }
-                if (!audioOnly) ActionChip(LucIcons.Pip, "Thu nhỏ", false, onPip)
-                ActionChip(
-                    LucIcons.Subtitles,
-                    when (settings.vietnamese) {
-                        1 -> "Phụ đề Việt"
-                        2 -> "Phụ đề + Thuyết minh"
-                        3 -> "Thuyết minh"
-                        else -> "Dịch tiếng Việt"
-                    },
-                    settings.vietnamese > 0,
-                    onVietnamese
-                )
-                if (ui.video?.live != true && ui.details?.live != true) {
-                    // Tap: next speed. Hold 1,5 s: the speed slider on the video.
-                    val on = ui.speed != 1f
-                    Text(
-                        speedButtonText(ui.speed), color = if (on) c.primary else c.text, fontSize = 12.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(c.surface2)
-                            .border(1.dp, if (on) c.primary.copy(alpha = 0.5f) else c.line, RoundedCornerShape(50))
-                            .speedPress(
-                                onTap = { PlayerController.setSpeed(nextSpeed(PlayerController.ui.value.speed)) },
-                                onHold = onSpeedHold,
-                            )
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
-                if (ui.choices.isNotEmpty()) {
-                    ActionChip(LucIcons.Tune, ui.quality?.label ?: "Chất lượng", false, onQuality)
-                }
-                if (d != null && !d.live && !kids) {
-                    ActionChip(LucIcons.Download, "Tải về", false) { downloadSheet = true }
-                }
-                if (!kids) ActionChip(LucIcons.Share, "Chia sẻ", false) {
-                    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-                        .putExtra(Intent.EXTRA_TEXT, v.url)
+                })
+                if (!kids) add(Tool(LucIcons.Share, "Chia sẻ", false) {
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, v.url)
                     context.startActivity(Intent.createChooser(send, "Chia sẻ video"))
-                }
+                })
             }
-        }
-        if (chapters.isNotEmpty()) {
-            item(key = "chapters") {
-                var pos by remember { mutableLongStateOf(0L) }
-                LaunchedEffect(Unit) {
-                    while (true) {
-                        pos = PlayerController.exo.currentPosition
-                        delay(1_000)
+            Column(
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                tools.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { t -> ToolCell(t, Modifier.weight(1f)) }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
-                val i = vn.lucbao.player.Chapters.indexAt(chapters, pos)
-                SectionRow(
-                    LucIcons.Chapters, "Chương ${maxOf(i, 0) + 1}/${chapters.size}",
-                    chapters.getOrNull(i)?.title ?: chapters.first().title, onChapters
-                )
             }
         }
-        // Comments: not in Chế độ Trẻ em, not for live streams.
-        if (!kids && d != null && !d.live) {
-            item(key = "comments") {
-                SectionRow(LucIcons.Comment, "Bình luận", "Xem bình luận của mọi người", onComments)
+        // Bình luận (left) and Chương (right); one alone takes the whole row.
+        val showComments = !kids && d != null && !d.live
+        val showChapters = chapters.isNotEmpty()
+        if (showComments || showChapters) {
+            item(key = "commentsChapters") {
+                Row(
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (showComments) WideCell(LucIcons.Comment, "Bình luận", Modifier.weight(1f), onComments)
+                    if (showChapters) WideCell(LucIcons.Chapters, "Chương", Modifier.weight(1f), onChapters)
+                }
             }
         }
         item(key = "nextTitle") {
             val loop by PlayerController.loopVideo.collectAsStateWithLifecycle()
             Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -1441,7 +1427,7 @@ private fun Details(
                 )
                 // Lặp lại: replay this video when it ends (wins over autoplay).
                 SmallToggle(LucIcons.RepeatOne, "Lặp lại", loop) { PlayerController.setLoopVideo(!loop) }
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 SmallToggle(
                     LucIcons.Play, if (settings.autoplayNext) "Tự phát: Bật" else "Tự phát: Tắt",
                     settings.autoplayNext && !loop
@@ -1482,18 +1468,64 @@ private fun Details(
 @Composable
 private fun SmallToggle(icon: ImageVector, text: String, on: Boolean, onClick: () -> Unit) {
     val c = Luc.colors
+    // Easy to see: filled green when on, a clear outline when off.
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (on) c.primary.copy(alpha = 0.18f) else Color.Transparent)
-            .border(1.dp, if (on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(50))
+            .background(if (on) c.primary else c.surface2)
+            .border(1.5.dp, if (on) c.primary else c.text.copy(alpha = 0.35f), RoundedCornerShape(50))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = if (on) c.primary else c.muted, modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(text, color = if (on) c.primary else c.muted, fontSize = 11.5.sp)
+        Icon(icon, null, tint = if (on) c.onPrimary else c.text, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(text, color = if (on) c.onPrimary else c.text, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** One tool under the video (Tải về, Chỉ nghe, …). */
+private class Tool(val icon: ImageVector, val text: String, val on: Boolean, val onClick: () -> Unit)
+
+/** A tool in the 3-per-row grid: framed like the other chips, icon above the name. */
+@Composable
+private fun ToolCell(t: Tool, modifier: Modifier) {
+    val c = Luc.colors
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(c.surface2)
+            .border(1.dp, if (t.on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(14.dp))
+            .clickable(onClick = t.onClick)
+            .padding(horizontal = 6.dp, vertical = 9.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(t.icon, null, tint = if (t.on) c.primary else c.text, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            t.text, color = if (t.on) c.primary else c.text, fontSize = 12.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** Bình luận / Chương: framed like the tools, icon and name side by side. */
+@Composable
+private fun WideCell(icon: ImageVector, text: String, modifier: Modifier, onClick: () -> Unit) {
+    val c = Luc.colors
+    Row(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(c.surface2)
+            .border(1.dp, c.line, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = c.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
