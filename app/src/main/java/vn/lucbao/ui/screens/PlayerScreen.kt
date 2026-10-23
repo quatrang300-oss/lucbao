@@ -1332,6 +1332,7 @@ private fun Details(
             // tap opens the channel sheet (it has Theo dõi). Right: "Yêu thích video".
             BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 val nameMax = maxWidth * 0.6f - 50.dp
+                val favWidth = (maxWidth - 16.dp) / 3
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Row(
                         Modifier
@@ -1350,7 +1351,7 @@ private fun Details(
                     }
                     Spacer(Modifier.weight(1f))
                     // As wide as one of the three tools below; heart above, name under it.
-                    FavoriteCell(ui.favorite, Modifier.width((maxWidth - 16.dp) / 3)) {
+                    FavoriteCell(ui.favorite, Modifier.width(favWidth)) {
                         PlayerController.toggleFavorite()
                     }
                 }
