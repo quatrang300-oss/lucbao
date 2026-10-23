@@ -71,6 +71,8 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
     val c = Luc.colors
     val history by Library.history.collectAsStateWithLifecycle()
     val favorites by Library.favorites.collectAsStateWithLifecycle()
+    val watchLater by Library.watchLater.collectAsStateWithLifecycle()
+    val backup = vn.lucbao.ui.components.rememberBackupActions()
     val channels by Library.channels.collectAsStateWithLifecycle()
     var openChannel by remember { mutableStateOf<Channel?>(null) }
     val downloads by Library.downloads.collectAsStateWithLifecycle()
@@ -100,6 +102,14 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                     IconTap(LucIcons.More, "Tuỳ chọn") { menu = true }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
+                            text = { Text("Sao lưu dữ liệu ra tệp") },
+                            onClick = { menu = false; backup.export() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Khôi phục từ tệp sao lưu") },
+                            onClick = { menu = false; backup.import() }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Xoá toàn bộ lịch sử") },
                             onClick = { menu = false; confirmClear = true }
                         )
@@ -116,22 +126,28 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                     .background(c.surface2)
                     .padding(4.dp)
             ) {
-                listOf(LucIcons.History to "Lịch sử", LucIcons.Heart to "Yêu thích", LucIcons.PersonAdd to "Kênh", LucIcons.Download to "Đã tải").forEachIndexed { i, (icon, label) ->
+                // Tab ids stay as before (0 Lịch sử, 1 Yêu thích, 2 Kênh, 3 Đã tải); Xem sau is 4.
+                listOf(
+                    Triple(0, LucIcons.History, "Lịch sử"),
+                    Triple(4, LucIcons.Bookmark, "Xem sau"),
+                    Triple(1, LucIcons.Heart, "Yêu thích"),
+                    Triple(2, LucIcons.PersonAdd, "Kênh"),
+                    Triple(3, LucIcons.Download, "Đã tải"),
+                ).forEach { (i, icon, label) ->
                     val on = tab == i
-                    Row(
+                    Column(
                         Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (on) c.card else androidx.compose.ui.graphics.Color.Transparent)
                             .clickable { tab = i }
-                            .padding(vertical = 9.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(icon, null, tint = if (on) c.primary else c.muted, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(icon, null, tint = if (on) c.primary else c.muted, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            label, fontSize = 12.sp, maxLines = 1, color = if (on) c.text else c.muted,
+                            label, fontSize = 11.sp, maxLines = 1, color = if (on) c.text else c.muted,
                             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
@@ -151,6 +167,9 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 } else if (tab == 3) {
                     Stat(downloads.size.toString(), "tệp đã tải", Modifier.weight(1f))
                     Stat(sizeText(downloads.sumOf { it.bytes }).removePrefix("~").ifEmpty { "0 MB" }, "dung lượng", Modifier.weight(1f))
+                } else if (tab == 4) {
+                    Stat(watchLater.size.toString(), "video xem sau", Modifier.weight(1f))
+                    Stat("Riêng tư", "chỉ lưu trên máy", Modifier.weight(1f))
                 } else if (tab == 2) {
                     Stat(channels.size.toString(), "kênh đang theo dõi", Modifier.weight(1f))
                     Stat("Riêng tư", "không cần tài khoản", Modifier.weight(1f))
@@ -183,6 +202,21 @@ fun LibraryScreen(onPlay: (Video) -> Unit) {
                 }
             }
             if (history.isNotEmpty()) item(key = "tipH") { Tip("Nhấn giữ một video để xoá khỏi lịch sử.") }
+        } else if (tab == 4) {
+            if (watchLater.isEmpty()) {
+                item(key = "emptyW") {
+                    EmptyState("Chưa có video xem sau", "Khi xem video, bấm “Xem sau” để để dành video xem lúc khác.")
+                }
+            }
+            itemsIndexed(watchLater, key = { i, w -> "w-$i-${w.video.url}" }) { _, w ->
+                val pos = Library.positionOf(w.video.url)
+                val p = if (w.video.duration > 0 && pos > 0) (pos / 1000f / w.video.duration).coerceIn(0f, 1f) else null
+                VideoRow(
+                    w.video, onClick = { onPlay(w.video) }, progress = p,
+                    onLongClick = { Library.toggleWatchLater(w.video) }
+                )
+            }
+            if (watchLater.isNotEmpty()) item(key = "tipW") { Tip("Nhấn giữ một video để bỏ khỏi Xem sau.") }
         } else if (tab == 3) {
             itemsIndexed(active, key = { _, w -> "w-${w.id}" }) { _, w ->
                 val title = w.progress.getString(DownloadWorker.KEY_TITLE)

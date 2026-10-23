@@ -184,6 +184,24 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
             Toggle("Tự phát video tiếp theo", s.autoplayNext) { v -> Prefs.update { it.copy(autoplayNext = v) } }
         }
 
+        Card("Tự bỏ qua trong video") {
+            Body("Bỏ qua những đoạn người làm video tự chèn vào, theo đánh dấu của cộng đồng SponsorBlock. Khi bỏ qua sẽ có nút \"Xem lại\" nếu muốn xem đoạn đó.")
+            Toggle("Đoạn tài trợ (\"Video được tài trợ bởi…\")", s.sbSponsor) { v -> Prefs.update { it.copy(sbSponsor = v) } }
+            Toggle("Đoạn tự quảng cáo sản phẩm, kênh khác", s.sbSelfPromo) { v -> Prefs.update { it.copy(sbSelfPromo = v) } }
+            Toggle("Đoạn nhắc like, đăng ký, bấm chuông", s.sbInteraction) { v -> Prefs.update { it.copy(sbInteraction = v) } }
+            Toggle("Đoạn mở đầu và kết thúc", s.sbIntroOutro) { v -> Prefs.update { it.copy(sbIntroOutro = v) } }
+            Toggle("Đoạn không phải nhạc trong video ca nhạc", s.sbMusicOfftopic) { v -> Prefs.update { it.copy(sbMusicOfftopic = v) } }
+        }
+
+        val backup = vn.lucbao.ui.components.rememberBackupActions()
+        Card("Sao lưu & chuyển máy") {
+            Body("Lưu kênh theo dõi, video yêu thích, xem sau, bài hát đã thích và lịch sử xem ra một tệp. Đổi máy thì mở tệp đó bằng \"Khôi phục\": dữ liệu được thêm vào, không mất gì đang có.")
+            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton("Sao lưu", LucIcons.Download, { backup.export() })
+                PillButton("Khôi phục", LucIcons.Upload, { backup.import() }, filled = false)
+            }
+        }
+
         Card("Mục ở thanh dưới cùng") {
             Toggle("Shorts", s.tabShorts) { v -> Prefs.update { it.copy(tabShorts = v) } }
             Toggle("Khám phá", s.tabSearch) { v -> Prefs.update { it.copy(tabSearch = v) } }

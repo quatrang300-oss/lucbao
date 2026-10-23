@@ -2,6 +2,17 @@
 
 package vn.lucbao.ui.screens
 
+import androidx.compose.ui.text.AnnotatedString
+import vn.lucbao.data.videoKey
+import vn.lucbao.data.Library
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.geometry.Size
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -232,6 +243,10 @@ fun PlayerScreen(
     var speedSlider by remember { mutableStateOf(false) }
     LaunchedEffect(locked) { if (locked) speedSlider = false }
     var showVietnamese by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    val chapters by vn.lucbao.player.Chapters.list.collectAsStateWithLifecycle()
+    LaunchedEffect(ui.video?.url) { showChapters = false; showComments = false }
     var morePanel by remember { mutableStateOf(false) }
     // Kept outside the panel so reopening "Nhiều video hơn" shows the list where it was left.
     val panelList = rememberLazyListState()
@@ -272,6 +287,7 @@ fun PlayerScreen(
                     onSpeedSlider = { speedSlider = it },
                     onLock = { onLockChange(true) },
                     onVietnamese = { showVietnamese = true },
+                    onChapters = { showChapters = true },
                     onMore = {
                         panelTouch = System.currentTimeMillis()
                         morePanel = true
@@ -297,6 +313,8 @@ fun PlayerScreen(
                     ui, onPip = onPip, onPlay = onPlay, onQuality = { showQuality = true },
                     onSpeedHold = { speedSlider = true },
                     onVietnamese = { showVietnamese = true },
+                    onChapters = { showChapters = true },
+                    onComments = { showComments = true },
                 )
             }
         }
@@ -305,6 +323,27 @@ fun PlayerScreen(
 
     if (showVietnamese && !locked) {
         VietnameseSheet(onDismiss = { showVietnamese = false })
+    }
+
+    if (showChapters && chapters.isNotEmpty() && !locked) {
+        val pos = PlayerController.exo.currentPosition
+        ChaptersSheet(
+            chapters, vn.lucbao.player.Chapters.indexAt(chapters, pos),
+            onPick = { ch ->
+                PlayerController.exo.seekTo(ch.startMs)
+                showChapters = false
+            },
+            onDismiss = { showChapters = false },
+        )
+    }
+
+    val commentsUrl = ui.details?.url ?: ui.video?.url
+    if (showComments && commentsUrl != null && !locked) {
+        CommentsSheet(
+            commentsUrl,
+            onPlayVideo = { v -> showComments = false; onPlay(v) },
+            onDismiss = { showComments = false },
+        )
     }
 
     if (showQuality && ui.choices.isNotEmpty() && !locked) {
@@ -461,7 +500,7 @@ private fun RelatedPanel(
 }
 
 @Composable
-fun VideoSurface(modifier: Modifier = Modifier) {
+fun VideoSurface(modifier: Modifier = Modifier, zoom: Float = 1f, pan: Offset = Offset.Zero) {
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
@@ -474,6 +513,15 @@ fun VideoSurface(modifier: Modifier = Modifier) {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 player = PlayerController.exo
+            }
+        },
+        // Phóng to: scale the video surface itself (a SurfaceView ignores Compose transforms).
+        update = { view ->
+            view.videoSurfaceView?.let { sv ->
+                sv.scaleX = zoom
+                sv.scaleY = zoom
+                sv.translationX = pan.x
+                sv.translationY = pan.y
             }
         },
         onRelease = { it.player = null },
@@ -494,10 +542,19 @@ private fun VideoArea(
     onSpeedSlider: (Boolean) -> Unit,
     onLock: () -> Unit,
     onVietnamese: () -> Unit,
+    onChapters: () -> Unit,
     onMore: () -> Unit,
 ) {
     val c = Luc.colors
     val exo = PlayerController.exo
+    val chapters by vn.lucbao.player.Chapters.list.collectAsStateWithLifecycle()
+    val skipNotice by vn.lucbao.player.SponsorSkip.notice.collectAsStateWithLifecycle()
+    LaunchedEffect(skipNotice) {
+        if (skipNotice != null) {
+            delay(6_000)
+            vn.lucbao.player.SponsorSkip.dismissNotice()
+        }
+    }
     val settings by Prefs.state.collectAsStateWithLifecycle()
     val caption by PlayerController.caption.collectAsStateWithLifecycle()
     var controls by remember { mutableStateOf(true) }
@@ -508,13 +565,59 @@ private fun VideoArea(
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
 
+    // Phóng to / thu nhỏ (full screen, two fingers): shape of the video for "Lấp đầy".
+    var videoAspect by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         while (true) {
             position = exo.currentPosition
             duration = exo.duration.coerceAtLeast(0)
             buffered = exo.bufferedPosition
+            val vs = exo.videoSize
+            videoAspect = if (vs.width > 0 && vs.height > 0) vs.width * vs.pixelWidthHeightRatio / vs.height else 0f
             delay(250)
         }
+    }
+    val haptic = LocalHapticFeedback.current
+    var areaSize by remember { mutableStateOf(IntSize.Zero) }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    // Unsnapped zoom, so a pinch can move on past the "Lấp đầy" mark.
+    var rawZoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    var pinching by remember { mutableStateOf(false) }
+    fun resetZoom() {
+        zoom = 1f
+        rawZoom = 1f
+        pan = Offset.Zero
+    }
+    // Another video, leaving full screen or opening "Nhiều video hơn": back to the video's own shape.
+    LaunchedEffect(ui.video?.url, fullscreen, panelOpen) { resetZoom() }
+    val zoomable = fullscreen && !panelOpen && ui.quality?.audioOnly != true && ui.error == null &&
+        videoAspect > 0f && areaSize.width > 0 && areaSize.height > 0
+    val areaW = areaSize.width.toFloat()
+    val areaH = areaSize.height.toFloat()
+    // Size of the picture at 1x (fitted inside the screen, black bars around it).
+    val wide = areaH > 0f && videoAspect > areaW / areaH
+    val fitW = if (wide) areaW else areaH * videoAspect
+    val fitH = if (wide && videoAspect > 0f) areaW / videoAspect else areaH
+    val fillScale = if (zoomable && fitW > 0f && fitH > 0f) maxOf(areaW / fitW, areaH / fitH) else 1f
+    val canFill = zoomable && fillScale > 1.02f
+    fun clampPan(p: Offset, z: Float): Offset {
+        val mx = maxOf(0f, (fitW * z - areaW) / 2f)
+        val my = maxOf(0f, (fitH * z - areaH) / 2f)
+        return Offset(p.x.coerceIn(-mx, mx), p.y.coerceIn(-my, my))
+    }
+    val zoomOk by rememberUpdatedState(zoomable)
+    val onPinch by rememberUpdatedState<(Float, Offset) -> Unit> { z, p ->
+        val before = zoom
+        rawZoom = (rawZoom * z).coerceIn(1f, 4f)
+        var nz = rawZoom
+        // Sticks to "Lấp đầy" when passing by it.
+        if (canFill && kotlin.math.abs(nz - fillScale) < 0.05f * fillScale) nz = fillScale
+        val hitFill = canFill && nz == fillScale && before != fillScale
+        val hitOne = nz == 1f && before != 1f
+        if (hitFill || hitOne) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        zoom = nz
+        pan = clampPan(pan + p, nz)
     }
     // Gesture handlers live across recompositions: read the slider state through these.
     val sliderOpen by rememberUpdatedState(speedSlider && !(ui.video?.live == true || ui.details?.live == true))
@@ -570,6 +673,30 @@ private fun VideoArea(
     Box(
         modifier
             .background(Color.Black)
+            .onSizeChanged { areaSize = it }
+            // Two fingers: phóng to / thu nhỏ and move the picture. One finger keeps its gestures
+            // (tap, double tap to seek, brightness / volume swipes).
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var active = false
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.none { it.pressed }) break
+                        if (zoomOk && event.changes.count { it.pressed } >= 2) {
+                            if (!active) {
+                                active = true
+                                pinching = true
+                            }
+                            val z = event.calculateZoom()
+                            val p = event.calculatePan()
+                            if (z != 1f || p != Offset.Zero) onPinch(z, p)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    }
+                    if (active) pinching = false
+                }
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
@@ -656,7 +783,7 @@ private fun VideoArea(
                 Text("Đang phát chỉ âm thanh", color = Color.White, fontSize = 13.sp)
             }
         } else {
-            VideoSurface(Modifier.fillMaxSize())
+            VideoSurface(Modifier.fillMaxSize(), zoom, pan)
         }
 
         if (ui.loading) {
@@ -712,6 +839,35 @@ private fun VideoArea(
 
         if (gestureKind != GESTURE_NONE) {
             GestureLevel(gestureKind, gestureLevel, Modifier.align(Alignment.TopCenter).padding(top = 48.dp))
+        }
+
+        if (pinching) {
+            Text(
+                zoomText(zoom), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+
+        skipNotice?.let { n ->
+            val controlsShown = controls || !ui.isPlaying
+            SkipNoticeChip(
+                n, onRewatch = { vn.lucbao.player.SponsorSkip.rewatch(exo) },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(
+                        start = if (fullscreen) 24.dp else 10.dp,
+                        bottom = when {
+                            controlsShown && fullscreen -> 112.dp
+                            controlsShown -> 50.dp
+                            fullscreen -> 26.dp
+                            else -> 10.dp
+                        }
+                    )
+            )
         }
 
         val statsOn by PlayerController.showStats.collectAsStateWithLifecycle()
@@ -771,6 +927,21 @@ private fun VideoArea(
                     }
                 }
 
+                // Zoomed in: "2.1x · Về gốc" under the top bar; tap to go back to the video's own shape.
+                if (zoomable && zoom > 1.01f) {
+                    Text(
+                        zoomText(zoom) + "  ·  Về gốc", color = Color.White, fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 54.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable { resetZoom(); touch++ }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
                 // In the small player the speed slider would cover these: hidden while it is open.
                 if (!(sliderOn && !fullscreen)) Row(
                     Modifier.align(Alignment.Center),
@@ -803,6 +974,29 @@ private fun VideoArea(
                 val isLive = ui.video?.live == true || ui.details?.live == true
                 // Full screen: playback speed at the bottom left, on the "Nhiều video hơn" row.
                 val showSpeedButton = fullscreen && !isLive
+                val showFill = canFill
+                val chapterIdx = vn.lucbao.player.Chapters.indexAt(chapters, if (dragging) (dragValue * duration).toLong() else position)
+                if (chapters.isNotEmpty() && chapterIdx >= 0 && !isLive) {
+                    // Current chapter above the time bar; tap for the list.
+                    Text(
+                        "• " + chapters[chapterIdx].title.ifBlank { "Chương ${chapterIdx + 1}" } + "  ›",
+                        color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(
+                                start = 16.dp, end = 80.dp,
+                                bottom = when {
+                                    showMore || showSpeedButton || showFill -> 104.dp
+                                    fullscreen -> 58.dp
+                                    else -> 44.dp
+                                }
+                            )
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onChapters(); touch++ }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -810,7 +1004,7 @@ private fun VideoArea(
                         .padding(
                             start = 12.dp, end = 4.dp,
                             bottom = when {
-                                showMore || showSpeedButton -> 58.dp
+                                showMore || showSpeedButton || showFill -> 58.dp
                                 fullscreen -> 12.dp
                                 else -> 0.dp
                             }
@@ -826,21 +1020,38 @@ private fun VideoArea(
                     } else {
                         val shown = if (dragging) (dragValue * duration).toLong() else position
                         Text(Format.millis(shown), color = Color.White, fontSize = 11.sp)
-                        Slider(
-                            value = if (dragging) dragValue
-                            else if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
-                            onValueChange = { dragging = true; dragValue = it; touch++ },
-                            onValueChangeFinished = {
-                                exo.seekTo((dragValue * duration).toLong())
-                                dragging = false
-                            },
-                            colors = SliderDefaults.colors(
-                                thumbColor = c.primary,
-                                activeTrackColor = c.primary,
-                                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                            ),
-                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                        )
+                        Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                            Slider(
+                                value = if (dragging) dragValue
+                                else if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
+                                onValueChange = { dragging = true; dragValue = it; touch++ },
+                                onValueChangeFinished = {
+                                    exo.seekTo((dragValue * duration).toLong())
+                                    dragging = false
+                                },
+                                colors = SliderDefaults.colors(
+                                    thumbColor = c.primary,
+                                    activeTrackColor = c.primary,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            // Chapters: a small gap in the time bar where each one starts.
+                            if (chapters.size > 1 && duration > 0) {
+                                Canvas(Modifier.matchParentSize()) {
+                                    val inset = 10.dp.toPx()
+                                    val w = size.width - inset * 2
+                                    chapters.drop(1).forEach { ch ->
+                                        val x = inset + w * (ch.startMs.toFloat() / duration).coerceIn(0f, 1f)
+                                        drawRect(
+                                            Color.Black.copy(alpha = 0.75f),
+                                            topLeft = Offset(x - 1.dp.toPx(), size.height / 2 - 4.dp.toPx()),
+                                            size = Size(2.dp.toPx(), 8.dp.toPx())
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Text(Format.millis(duration), color = Color.White, fontSize = 11.sp)
                     }
                     IconTap(
@@ -850,11 +1061,16 @@ private fun VideoArea(
                     )
                 }
 
+                if (showSpeedButton || showFill) Row(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 16.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 if (showSpeedButton) {
                     Row(
                         Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 16.dp, bottom = 10.dp)
                             .clip(RoundedCornerShape(50))
                             .background(Color.White.copy(alpha = if (ui.speed != 1f) 0.22f else 0.12f))
                             .speedPress(
@@ -873,6 +1089,34 @@ private fun VideoArea(
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                         )
                     }
+                }
+                if (showFill) {
+                    // "Lấp đầy": zoom just enough to lose the black bars; "Vừa màn hình": back.
+                    val filled = kotlin.math.abs(zoom - fillScale) < 0.01f
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = if (filled) 0.22f else 0.12f))
+                            .clickable {
+                                if (filled) resetZoom() else {
+                                    zoom = fillScale
+                                    rawZoom = fillScale
+                                    pan = Offset.Zero
+                                }
+                                touch++
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(LucIcons.AspectRatio, null, tint = if (filled) c.primary else Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (filled) "Vừa màn hình" else "Lấp đầy",
+                            color = if (filled) c.primary else Color.White,
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 }
 
                 if (showMore && upNext != null) {
@@ -1000,10 +1244,15 @@ private fun Details(
     onQuality: () -> Unit,
     onSpeedHold: () -> Unit,
     onVietnamese: () -> Unit,
+    onChapters: () -> Unit,
+    onComments: () -> Unit,
 ) {
     val c = Luc.colors
     val context = LocalContext.current
     val d = ui.details
+    val watchLater by Library.watchLater.collectAsStateWithLifecycle()
+    val chapters by vn.lucbao.player.Chapters.list.collectAsStateWithLifecycle()
+    var sleepSheet by remember { mutableStateOf(false) }
     val v = ui.video ?: return
     val settings by Prefs.state.collectAsStateWithLifecycle()
     var expanded by remember(v.url) { mutableStateOf(false) }
@@ -1018,7 +1267,8 @@ private fun Details(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    // Tap opens the description; it closes with "Rút gọn" (links inside stay tappable).
+                    .clickable(enabled = !expanded) { expanded = true }
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
             ) {
                 Text(
@@ -1031,14 +1281,29 @@ private fun Details(
                         if (expanded) "" else "  …thêm",
                     color = c.muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 5.dp)
                 )
-                if (expanded && !d?.description.isNullOrBlank()) {
+                if (expanded) {
+                    if (!d?.description.isNullOrBlank()) {
+                        Text(
+                            // Chế độ Trẻ em: no links (they lead out of the kids' list).
+                            if (kids) AnnotatedString(d?.description ?: "")
+                            else rememberLinkedText(d?.description ?: "", onPlay),
+                            color = c.text, fontSize = 12.5.sp, lineHeight = 18.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(c.surface2)
+                                .padding(12.dp)
+                        )
+                    }
                     Text(
-                        d?.description ?: "", color = c.text, fontSize = 12.5.sp, lineHeight = 18.sp,
+                        "Rút gọn", color = c.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier
-                            .padding(top = 10.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(c.surface2)
-                            .padding(12.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .padding(top = 6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .clickable { expanded = false }
+                            .padding(horizontal = 18.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -1075,6 +1340,12 @@ private fun Details(
                 ActionChip(LucIcons.Heart, if (ui.favorite) "Đã thích" else "Yêu thích", ui.favorite) {
                     PlayerController.toggleFavorite()
                 }
+                val later = watchLater.any { videoKey(it.video.url) == videoKey(v.url) }
+                ActionChip(LucIcons.Bookmark, if (later) "Đã lưu xem sau" else "Xem sau", later) {
+                    Library.toggleWatchLater(ui.video ?: v)
+                }
+                val (sleepText, sleepOn) = videoSleepLabel()
+                ActionChip(LucIcons.Timer, sleepText, sleepOn) { sleepSheet = true }
                 val audioOnly = ui.quality?.audioOnly == true
                 if (ui.choices.any { it.audioOnly }) {
                     ActionChip(LucIcons.Headphones, "Chỉ nghe", audioOnly) {
@@ -1125,6 +1396,28 @@ private fun Details(
                 }
             }
         }
+        if (chapters.isNotEmpty()) {
+            item(key = "chapters") {
+                var pos by remember { mutableLongStateOf(0L) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        pos = PlayerController.exo.currentPosition
+                        delay(1_000)
+                    }
+                }
+                val i = vn.lucbao.player.Chapters.indexAt(chapters, pos)
+                SectionRow(
+                    LucIcons.Chapters, "Chương ${maxOf(i, 0) + 1}/${chapters.size}",
+                    chapters.getOrNull(i)?.title ?: chapters.first().title, onChapters
+                )
+            }
+        }
+        // Comments: not in Chế độ Trẻ em, not for live streams.
+        if (!kids && d != null && !d.live) {
+            item(key = "comments") {
+                SectionRow(LucIcons.Comment, "Bình luận", "Xem bình luận của mọi người", onComments)
+            }
+        }
         item(key = "nextTitle") {
             val loop by PlayerController.loopVideo.collectAsStateWithLifecycle()
             Row(
@@ -1161,6 +1454,10 @@ private fun Details(
 
     if (downloadSheet && d != null) {
         DownloadSheet(d, onDismiss = { downloadSheet = false })
+    }
+
+    if (sleepSheet) {
+        SleepTimerSheet(onDismiss = { sleepSheet = false })
     }
 
     if (channelSheet && channelUrl != null) {
