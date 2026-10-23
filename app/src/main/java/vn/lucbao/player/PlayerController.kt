@@ -308,6 +308,16 @@ object PlayerController {
                     _sleepAt.value = 0
                     exo.pause()
                 }
+                // "Khi hết video này" while Lặp lại is on: the video never ends, so stop at its end.
+                if (sleep == -1L && _loopVideo.value && exo.isPlaying) {
+                    val d = exo.duration
+                    if (d > 0 && exo.currentPosition >= d - 600) {
+                        _sleepAt.value = 0
+                        exo.pause()
+                    }
+                }
+                // SponsorBlock: jump over sponsor reads and the like.
+                SponsorSkip.tick(exo)
             }
         }
     }
@@ -352,6 +362,8 @@ object PlayerController {
             speed = current.speed
         )
         resetCaptions()
+        SponsorSkip.clear()
+        Chapters.clear()
         val music = _queue.value.music
         // Kids mode keeps its own history out of "Dành cho bạn".
         if (!music && !KidsStore.isActive) Library.recordWatch(video)
@@ -476,6 +488,8 @@ object PlayerController {
         exo.clearMediaItems()
         backStack.clear()
         resetCaptions()
+        SponsorSkip.clear()
+        Chapters.clear()
         _queue.value = QueueState(shuffle = shuffleOn, repeat = repeatMode)
         _sleepAt.value = 0
         if (_loopVideo.value) setLoopVideo(false)
@@ -671,7 +685,7 @@ object PlayerController {
         say(
             when {
                 minutes == 0 -> "Đã tắt hẹn giờ"
-                minutes < 0 -> "Sẽ dừng khi hết bài này"
+                minutes < 0 -> if (_queue.value.music && !_queue.value.videoOnce) "Sẽ dừng khi hết bài này" else "Sẽ dừng khi hết video này"
                 else -> "Sẽ dừng sau $minutes phút"
             }
         )
@@ -935,6 +949,8 @@ object PlayerController {
                     )
                 }
                 applySpeedAudio()
+                SponsorSkip.load(details.url, details.live)
+                Chapters.load(details.url, details.live)
                 if (Prefs.current.vietnamese > 0 && captionsFor != details.url) {
                     loadCaptions(details.url)
                 }
