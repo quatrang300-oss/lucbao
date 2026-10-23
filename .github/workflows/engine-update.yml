@@ -12,8 +12,9 @@ permissions:
   contents: write
   actions: write
 
+# Own group: a scheduled check must never cancel an app build that is waiting to run.
 concurrency:
-  group: lucbao-publish
+  group: lucbao-engine-update
   cancel-in-progress: false
 
 jobs:
