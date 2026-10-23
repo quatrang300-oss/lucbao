@@ -1349,10 +1349,10 @@ private fun Details(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    ActionChip(
-                        if (ui.favorite) LucIcons.Heart else LucIcons.HeartOutline,
-                        "Yêu thích video", ui.favorite
-                    ) { PlayerController.toggleFavorite() }
+                    // As wide as one of the three tools below; heart above, name under it.
+                    FavoriteCell(ui.favorite, Modifier.width((maxWidth - 16.dp) / 3)) {
+                        PlayerController.toggleFavorite()
+                    }
                 }
             }
         }
@@ -1487,23 +1487,51 @@ private fun SmallToggle(icon: ImageVector, text: String, on: Boolean, onClick: (
 /** One tool under the video (Tải về, Chỉ nghe, …). */
 private class Tool(val icon: ImageVector, val text: String, val on: Boolean, val onClick: () -> Unit)
 
-/** A tool in the 3-per-row grid: framed like the other chips, icon above the name. */
+/** A tool in the 3-per-row grid: one line, icon and name, framed like the old chips. */
 @Composable
 private fun ToolCell(t: Tool, modifier: Modifier) {
+    val c = Luc.colors
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(c.surface2)
+            .border(1.dp, if (t.on) c.primary.copy(alpha = 0.5f) else c.line, RoundedCornerShape(50))
+            .clickable(onClick = t.onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(t.icon, null, tint = if (t.on) c.primary else c.text, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(
+            t.text, color = if (t.on) c.primary else c.text, fontSize = 12.sp, maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private val HeartRed = Color(0xFFE53935)
+
+/** "Yêu thích video": framed, heart above (red when liked; name and frame turn green), name under it. */
+@Composable
+private fun FavoriteCell(on: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = Luc.colors
     Column(
         modifier
             .clip(RoundedCornerShape(14.dp))
             .background(c.surface2)
-            .border(1.dp, if (t.on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(14.dp))
-            .clickable(onClick = t.onClick)
-            .padding(horizontal = 6.dp, vertical = 9.dp),
+            .border(1.dp, if (on) c.primary.copy(alpha = 0.6f) else c.line, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(t.icon, null, tint = if (t.on) c.primary else c.text, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.height(4.dp))
+        Icon(
+            if (on) LucIcons.Heart else LucIcons.HeartOutline, null,
+            tint = if (on) HeartRed else c.text, modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.height(3.dp))
         Text(
-            t.text, color = if (t.on) c.primary else c.text, fontSize = 12.sp, maxLines = 1,
+            "Yêu thích video", color = if (on) c.primary else c.text, fontSize = 11.5.sp, maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
     }
