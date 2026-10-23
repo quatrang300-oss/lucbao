@@ -94,6 +94,10 @@ object Library {
     private val _savedLists = MutableStateFlow<List<SavedList>>(emptyList())
     val savedLists: StateFlow<List<SavedList>> = _savedLists.asStateFlow()
 
+    /** "Xem sau": videos saved to watch later (separate from Yêu thích). */
+    private val _watchLater = MutableStateFlow<List<FavoriteEntry>>(emptyList())
+    val watchLater: StateFlow<List<FavoriteEntry>> = _watchLater.asStateFlow()
+
     fun init(context: Context) {
         file = File(context.filesDir, "library.json")
         runCatching {
@@ -133,8 +137,86 @@ object Library {
                         o.optString("avatar").ifEmpty { null }, o.optLong("t")
                     )
                 }
+                _watchLater.value = root.optJSONArray("watchLater").toList { o ->
+                    FavoriteEntry(o.getJSONObject("v").toVideo(), o.optLong("t"))
+                }
             }
         }
+    }
+
+    // ---- Xem sau
+
+    fun isWatchLater(url: String): Boolean {
+        val key = videoKey(url)
+        return _watchLater.value.any { videoKey(it.video.url) == key }
+    }
+
+    fun toggleWatchLater(video: Video) {
+        val key = videoKey(video.url)
+        _watchLater.value = if (isWatchLater(video.url)) {
+            _watchLater.value.filterNot { videoKey(it.video.url) == key }
+        } else {
+            listOf(FavoriteEntry(video, System.currentTimeMillis())) + _watchLater.value
+        }
+        save()
+    }
+
+    // ---- Sao lưu & khôi phục
+
+    /** What a backup file holds (no downloads: those files stay on the old phone). */
+    data class BackupCounts(
+        val history: Int, val favorites: Int, val watchLater: Int, val channels: Int,
+        val songs: Int, val lists: Int,
+    )
+
+    /** The whole library as a backup file (JSON text). */
+    fun exportBackup(): String {
+        val root = buildJson(includeDownloads = false)
+        root.put("format", "lucbao-backup")
+        root.put("version", 1)
+        root.put("exportedAt", System.currentTimeMillis())
+        return root.toString(1)
+    }
+
+    /**
+     * Adds a backup to what is already here: nothing is deleted, items already present are
+     * kept once (the most recent wins for history).
+     * @throws IllegalArgumentException when the file is not a Lục Bảo backup
+     */
+    @Synchronized
+    fun importBackup(text: String): BackupCounts {
+        val root = runCatching { JSONObject(text) }.getOrNull()
+        require(root != null && root.optString("format") == "lucbao-backup") { "not a backup" }
+        val h = root.optJSONArray("history").toList { o ->
+            HistoryEntry(o.getJSONObject("v").toVideo(), o.optLong("p"), o.optLong("t"))
+        }
+        val f = root.optJSONArray("favorites").toList { o -> FavoriteEntry(o.getJSONObject("v").toVideo(), o.optLong("t")) }
+        val w = root.optJSONArray("watchLater").toList { o -> FavoriteEntry(o.getJSONObject("v").toVideo(), o.optLong("t")) }
+        val ch = root.optJSONArray("channels").toList { o ->
+            Channel(o.getString("url"), o.optString("name"), o.optString("avatar").ifEmpty { null }, o.optLong("t"))
+        }
+        val songs = root.optJSONArray("songs").toList { it.toVideo() }
+        val recent = root.optJSONArray("recentSongs").toList { it.toVideo() }
+        val lists = root.optJSONArray("lists").toList { o ->
+            SavedList(
+                o.getString("url"), o.optString("title"), o.optString("artist"),
+                o.optString("thumb").ifEmpty { null }, o.optString("type", "playlist"), o.optLong("t"),
+            )
+        }
+
+        _history.value = (_history.value + h)
+            .groupBy { videoKey(it.video.url) }.values
+            .map { same -> same.maxBy { it.watchedAt } }
+            .sortedByDescending { it.watchedAt }
+            .take(MAX_HISTORY)
+        _favorites.value = (_favorites.value + f).distinctBy { videoKey(it.video.url) }
+        _watchLater.value = (_watchLater.value + w).distinctBy { videoKey(it.video.url) }
+        _channels.value = (_channels.value + ch).distinctBy { channelKey(it.url) }
+        setLiked((_likedSongs.value + songs).distinctBy { videoKey(it.url) })
+        _recentSongs.value = (_recentSongs.value + recent).distinctBy { videoKey(it.url) }.take(MAX_RECENT_SONGS)
+        _savedLists.value = (_savedLists.value + lists).distinctBy { it.url }
+        save()
+        return BackupCounts(h.size, f.size, w.size, ch.size, songs.size, lists.size)
     }
 
     fun recordWatch(video: Video) {
@@ -257,55 +339,64 @@ object Library {
     }
 
     private fun save() {
-        val h = _history.value
-        val dl = _downloads.value
-        val f = _favorites.value
-        val ch = _channels.value
-        val songs = _likedSongs.value
-        val recentSongs = _recentSongs.value
-        val lists = _savedLists.value
         io.execute {
             runCatching {
-                val root = JSONObject()
-                root.put("history", JSONArray().apply {
-                    h.forEach {
-                        put(JSONObject().put("v", it.video.toJson()).put("p", it.positionMs)
-                            .put("t", it.watchedAt))
-                    }
-                })
-                root.put("favorites", JSONArray().apply {
-                    f.forEach { put(JSONObject().put("v", it.video.toJson()).put("t", it.addedAt)) }
-                })
-                root.put("downloads", JSONArray().apply {
-                    dl.forEach {
-                        put(
-                            JSONObject().put("title", it.title).put("thumb", it.thumbnail ?: "")
-                                .put("uri", it.uri).put("path", it.path ?: "").put("mime", it.mime)
-                                .put("label", it.label).put("bytes", it.bytes).put("src", it.sourceUrl)
-                                .put("t", it.at)
-                        )
-                    }
-                })
-                root.put("channels", JSONArray().apply {
-                    ch.forEach {
-                        put(JSONObject().put("url", it.url).put("name", it.name)
-                            .put("avatar", it.avatar ?: "").put("t", it.addedAt))
-                    }
-                })
-                root.put("songs", JSONArray().apply { songs.forEach { put(it.toJson()) } })
-                root.put("recentSongs", JSONArray().apply { recentSongs.forEach { put(it.toJson()) } })
-                root.put("lists", JSONArray().apply {
-                    lists.forEach {
-                        put(JSONObject().put("url", it.url).put("title", it.title)
-                            .put("artist", it.artist).put("thumb", it.thumb ?: "")
-                            .put("type", it.type).put("t", it.addedAt))
-                    }
-                })
+                val root = buildJson(includeDownloads = true)
                 val tmp = File(file.parentFile, "library.json.tmp")
                 tmp.writeText(root.toString())
                 tmp.renameTo(file)
             }
         }
+    }
+
+    private fun buildJson(includeDownloads: Boolean): JSONObject {
+        val h = _history.value
+        val dl = if (includeDownloads) _downloads.value else emptyList()
+        val f = _favorites.value
+        val w = _watchLater.value
+        val ch = _channels.value
+        val songs = _likedSongs.value
+        val recentSongs = _recentSongs.value
+        val lists = _savedLists.value
+        val root = JSONObject()
+        root.put("history", JSONArray().apply {
+            h.forEach {
+                put(JSONObject().put("v", it.video.toJson()).put("p", it.positionMs)
+                    .put("t", it.watchedAt))
+            }
+        })
+        root.put("favorites", JSONArray().apply {
+            f.forEach { put(JSONObject().put("v", it.video.toJson()).put("t", it.addedAt)) }
+        })
+        root.put("watchLater", JSONArray().apply {
+            w.forEach { put(JSONObject().put("v", it.video.toJson()).put("t", it.addedAt)) }
+        })
+        if (includeDownloads) root.put("downloads", JSONArray().apply {
+            dl.forEach {
+                put(
+                    JSONObject().put("title", it.title).put("thumb", it.thumbnail ?: "")
+                        .put("uri", it.uri).put("path", it.path ?: "").put("mime", it.mime)
+                        .put("label", it.label).put("bytes", it.bytes).put("src", it.sourceUrl)
+                        .put("t", it.at)
+                )
+            }
+        })
+        root.put("channels", JSONArray().apply {
+            ch.forEach {
+                put(JSONObject().put("url", it.url).put("name", it.name)
+                    .put("avatar", it.avatar ?: "").put("t", it.addedAt))
+            }
+        })
+        root.put("songs", JSONArray().apply { songs.forEach { put(it.toJson()) } })
+        root.put("recentSongs", JSONArray().apply { recentSongs.forEach { put(it.toJson()) } })
+        root.put("lists", JSONArray().apply {
+            lists.forEach {
+                put(JSONObject().put("url", it.url).put("title", it.title)
+                    .put("artist", it.artist).put("thumb", it.thumb ?: "")
+                    .put("type", it.type).put("t", it.addedAt))
+            }
+        })
+        return root
     }
 
     private fun Video.toJson() = JSONObject()
