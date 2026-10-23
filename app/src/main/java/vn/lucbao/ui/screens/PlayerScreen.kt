@@ -2,6 +2,9 @@
 
 package vn.lucbao.ui.screens
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.AnnotatedString
 import vn.lucbao.data.videoKey
 import vn.lucbao.data.Library
@@ -515,17 +518,25 @@ fun VideoSurface(modifier: Modifier = Modifier, zoom: Float = 1f, pan: Offset = 
                 player = PlayerController.exo
             }
         },
-        // Phóng to: scale the video surface itself (a SurfaceView ignores Compose transforms).
-        update = { view ->
-            view.videoSurfaceView?.let { sv ->
-                sv.scaleX = zoom
-                sv.scaleY = zoom
-                sv.translationX = pan.x
-                sv.translationY = pan.y
-            }
-        },
         onRelease = { it.player = null },
-        modifier = modifier
+        // Phóng to: the player itself is laid out [zoom] times bigger than the screen (and moved by
+        // [pan]), so the picture really grows past its black bars. Scaling the video surface
+        // instead would keep it cut to its old size.
+        modifier = modifier.layout { measurable, constraints ->
+            val w = constraints.maxWidth
+            val h = constraints.maxHeight
+            if (zoom <= 1.001f || w == Constraints.Infinity || h == Constraints.Infinity) {
+                val p = measurable.measure(constraints)
+                layout(p.width, p.height) { p.place(0, 0) }
+            } else {
+                val zw = (w * zoom).roundToInt()
+                val zh = (h * zoom).roundToInt()
+                val p = measurable.measure(Constraints.fixed(zw, zh))
+                layout(w, h) {
+                    p.place((w - zw) / 2 + pan.x.roundToInt(), (h - zh) / 2 + pan.y.roundToInt())
+                }
+            }
+        }
     )
 }
 
