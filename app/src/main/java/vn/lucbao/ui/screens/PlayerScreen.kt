@@ -2,6 +2,7 @@
 
 package vn.lucbao.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlin.math.roundToInt
@@ -542,6 +543,7 @@ fun VideoSurface(modifier: Modifier = Modifier, zoom: Float = 1f, pan: Offset = 
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VideoArea(
     ui: PlayerUi,
@@ -644,12 +646,15 @@ private fun VideoArea(
     // Another video: close it.
     LaunchedEffect(ui.video?.url) { if (speedSlider) onSpeedSlider(false) }
     // Closes 3 s after the last touch on it.
+    // Closes 3 s after the last touch on it, and the controls go with it.
     LaunchedEffect(sliderOn, sliderTouch, sliderDragging) {
         if (sliderOn && !sliderDragging) {
             delay(3_000)
             onSpeedSlider(false)
+            if (exo.isPlaying) controls = false
         }
     }
+    val loop by PlayerController.loopVideo.collectAsStateWithLifecycle()
     // Hide the controls a few seconds after the last touch while playing.
     LaunchedEffect(controls, touch, ui.isPlaying, sliderOn) {
         if (controls && ui.isPlaying && !sliderOn) {
@@ -713,8 +718,11 @@ private fun VideoArea(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
-                        // A tap anywhere else closes the speed slider at once.
-                        if (sliderOpen) setSlider(false) else controls = !controls
+                        // A tap anywhere on the video hides everything at once (speed slider too).
+                        if (sliderOpen) {
+                            setSlider(false)
+                            controls = false
+                        } else controls = !controls
                         touch++
                     },
                     onDoubleTap = { o ->
@@ -988,8 +996,9 @@ private fun VideoArea(
                 // Full screen: playback speed at the bottom left, on the "Nhiều video hơn" row.
                 val showSpeedButton = fullscreen && !isLive
                 val showFill = canFill
+                val showLoop = fullscreen
                 val chapterIdx = vn.lucbao.player.Chapters.indexAt(chapters, if (dragging) (dragValue * duration).toLong() else position)
-                if (chapters.isNotEmpty() && chapterIdx >= 0 && !isLive) {
+                if (chapters.isNotEmpty() && chapterIdx >= 0 && !isLive && !sliderOn) {
                     // Current chapter above the time bar; tap for the list.
                     Text(
                         "• " + chapters[chapterIdx].title.ifBlank { "Chương ${chapterIdx + 1}" } + "  ›",
@@ -1000,7 +1009,7 @@ private fun VideoArea(
                             .padding(
                                 start = 16.dp, end = 80.dp,
                                 bottom = when {
-                                    showMore || showSpeedButton || showFill -> 104.dp
+                                    showMore || showSpeedButton || showFill || showLoop -> 104.dp
                                     fullscreen -> 58.dp
                                     else -> 44.dp
                                 }
@@ -1017,7 +1026,7 @@ private fun VideoArea(
                         .padding(
                             start = 12.dp, end = 4.dp,
                             bottom = when {
-                                showMore || showSpeedButton || showFill -> 58.dp
+                                showMore || showSpeedButton || showFill || showLoop -> 58.dp
                                 fullscreen -> 12.dp
                                 else -> 0.dp
                             }
@@ -1033,6 +1042,11 @@ private fun VideoArea(
                     } else {
                         val shown = if (dragging) (dragValue * duration).toLong() else position
                         Text(Format.millis(shown), color = Color.White, fontSize = 11.sp)
+                        val seekColors = SliderDefaults.colors(
+                            thumbColor = c.primary,
+                            activeTrackColor = c.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                        )
                         Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
                             Slider(
                                 value = if (dragging) dragValue
@@ -1042,17 +1056,27 @@ private fun VideoArea(
                                     exo.seekTo((dragValue * duration).toLong())
                                     dragging = false
                                 },
-                                colors = SliderDefaults.colors(
-                                    thumbColor = c.primary,
-                                    activeTrackColor = c.primary,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                                ),
+                                colors = seekColors,
+                                // A thin bar (a third of the default) with a small round knob;
+                                // the touch area stays full height, so it is still easy to grab.
+                                thumb = {
+                                    Box(Modifier.size(14.dp).clip(CircleShape).background(c.primary))
+                                },
+                                track = { st ->
+                                    SliderDefaults.Track(
+                                        sliderState = st,
+                                        modifier = Modifier.height(5.dp),
+                                        colors = seekColors,
+                                        drawStopIndicator = null,
+                                        thumbTrackGapSize = 0.dp,
+                                    )
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             // Chapters: a small gap in the time bar where each one starts.
                             if (chapters.size > 1 && duration > 0) {
                                 Canvas(Modifier.matchParentSize()) {
-                                    val inset = 10.dp.toPx()
+                                    val inset = 7.dp.toPx()
                                     val w = size.width - inset * 2
                                     chapters.drop(1).forEach { ch ->
                                         val x = inset + w * (ch.startMs.toFloat() / duration).coerceIn(0f, 1f)
@@ -1074,7 +1098,7 @@ private fun VideoArea(
                     )
                 }
 
-                if (showSpeedButton || showFill) Row(
+                if (showSpeedButton || showFill || showLoop) Row(
                     Modifier
                         .align(Alignment.BottomStart)
                         .padding(start = 16.dp, bottom = 10.dp),
@@ -1087,11 +1111,14 @@ private fun VideoArea(
                             .clip(RoundedCornerShape(50))
                             .background(Color.White.copy(alpha = if (ui.speed != 1f) 0.22f else 0.12f))
                             .speedPress(
+                                // First tap: the slider. Tap again while it shows: next speed.
                                 onTap = {
-                                    PlayerController.setSpeed(nextSpeed(PlayerController.ui.value.speed))
+                                    if (!sliderOpen) setSlider(true)
+                                    else PlayerController.setSpeed(nextSpeed(PlayerController.ui.value.speed))
+                                    sliderTouch++
                                     touch++
                                 },
-                                onHold = { setSlider(true); touch++ },
+                                onHold = { setSlider(true); sliderTouch++; touch++ },
                             )
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1126,6 +1153,31 @@ private fun VideoArea(
                         Text(
                             if (filled) "Vừa màn hình" else "Lấp đầy",
                             color = if (filled) c.primary else Color.White,
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                if (showLoop) {
+                    // Lặp lại: the same switch as under the video.
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = if (loop) 0.22f else 0.12f))
+                            .clickable {
+                                val on = !loop
+                                PlayerController.setLoopVideo(on)
+                                Toast.makeText(
+                                    context, if (on) "Đã bật lặp lại video này" else "Đã tắt lặp lại", Toast.LENGTH_SHORT
+                                ).show()
+                                touch++
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(LucIcons.RepeatOne, null, tint = if (loop) c.primary else Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Lặp lại", color = if (loop) c.primary else Color.White,
                             fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                         )
                     }
